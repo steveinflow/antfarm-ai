@@ -1,0 +1,25 @@
+{
+  "name": "@docket/advisor",
+  "version": "0.4.1",
+  "type": "module",
+  "main": "src/start-advisor.js",
+  "exports": {
+    ".": "./src/start-advisor.js"
+  },
+  "bin": {
+    "docket-advisor": "./bin/advisor.js"
+  },
+  "dependencies": {
+    "@docket/core": "*",
+    "@anthropic-ai/claude-agent-sdk": "^0.2.0",
+    "firebase-admin": "^13.0.0",
+    "picomatch": "^4.0.2",
+    "playwright": "^1.50.0",
+    "sharp": "^0.34.0"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "license": "MIT"
+}

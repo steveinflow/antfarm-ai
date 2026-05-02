@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Page not found — Docket</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231a1a1a'/%3E%3Ctext x='16' y='23' font-family='Inter%2C-apple-system%2Csans-serif' font-size='20' font-weight='600' fill='%23ffffff' text-anchor='middle'%3ED%3C/text%3E%3C/svg%3E">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg: #1a1a1a;
+      --bg-surface: #1e1e1e;
+      --bg-elevated: #222;
+      --border: #3a3a3a;
+      --text: #e0e0e0;
+      --text-bright: #fff;
+      --text-secondary: #aaa;
+      --text-faint: #999;
+      --text-very-faint: #888;
+      --primary: #663399;
+      --primary-hover: #7a44b3;
+      --primary-text: #b380e0;
+    }
+
+    html, body {
+      height: 100%;
+    }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 2rem;
+      text-align: center;
+    }
+
+    .logo {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      margin-bottom: 2.5rem;
+      text-decoration: none;
+    }
+
+    .logo-icon {
+      width: 36px;
+      height: 36px;
+      background: #1a1a1a;
+      border: 1px solid var(--border);
+      border-radius: 7px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: #fff;
+      flex-shrink: 0;
+    }
+
+    .logo-text {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-bright);
+      letter-spacing: -0.01em;
+    }
+
+    .card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 2.5rem 3rem;
+      max-width: 420px;
+      width: 100%;
+    }
+
+    .error-code {
+      font-size: 3.5rem;
+      font-weight: 600;
+      color: var(--primary-text);
+      line-height: 1;
+      margin-bottom: 0.75rem;
+      letter-spacing: -0.02em;
+    }
+
+    .error-title {
+      font-size: 1.15rem;
+      font-weight: 600;
+      color: var(--text-bright);
+      margin-bottom: 0.5rem;
+    }
+
+    .error-desc {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      margin-bottom: 1.75rem;
+    }
+
+    .home-btn {
+      display: inline-block;
+      background: var(--primary);
+      color: #fff;
+      text-decoration: none;
+      padding: 0.55rem 1.4rem;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      transition: background 0.15s;
+    }
+
+    .home-btn:hover {
+      background: var(--primary-hover);
+    }
+
+    .redirect-notice {
+      margin-top: 1.25rem;
+      font-size: 0.78rem;
+      color: var(--text-very-faint);
+    }
+
+    .redirect-notice span {
+      color: var(--text-faint);
+      font-weight: 500;
+    }
+  </style>
+  <script>
+    // ─── GitHub Pages SPA routing fallback ────────────────────────────────────
+    //
+    // WHY THIS FILE EXISTS
+    // GitHub Pages serves static files only. When a user navigates directly to
+    // any URL that doesn't match a static file (e.g. a bookmark, a link shared
+    // from another app, or a browser refresh on a "deep" URL), GitHub Pages
+    // returns this 404.html instead of a 500 or a blank page.
+    //
+    // HOW ROUTING WORKS IN THIS APP
+    // Docket uses hash-based routing exclusively (e.g. /#triage). Hash fragments
+    // are never sent to the server, so GitHub Pages never sees them — which means
+    // hash routes work natively without any server configuration. This was a
+    // deliberate choice to avoid the complexity of path-based SPA routing on a
+    // static host.
+    //
+    // WHAT THIS FILE DOES
+    // Because hash-based routing is used, this 404.html doesn't need to encode
+    // and restore a pathname (the classic SPA trick of stuffing the path into a
+    // query parameter and reading it back in index.html). Instead, it simply
+    // finds the deployment root by walking up the path one level and redirects
+    // there. The hash fragment is preserved by the browser automatically across
+    // location.replace() calls, so a link like /projects/docket/404#triage will
+    // still open the triage panel after redirect.
+    //
+    // IF YOU ADD PATH-BASED ROUTES IN THE FUTURE
+    // If Docket ever adopts path-based client-side routing (e.g. via React
+    // Router with history mode), you will need to update this file to encode the
+    // current path + search into a query parameter and restore it in index.html.
+    // See https://github.com/rafgraph/spa-github-pages for the canonical pattern.
+    // ──────────────────────────────────────────────────────────────────────────
+    (function () {
+      var l = window.location;
+
+      // Walk up the path to find the deployment root.
+      // For /projects/docket/some-unknown-page, we want /projects/docket/.
+      //
+      // Normalise first: collapse any double-slashes (e.g. from a PWA that
+      // launched with an absolute start_url like /projects/docket/ instead of
+      // the correct relative ./ form) and strip any trailing slash so that
+      // pathParts.pop() always removes a real path segment rather than the
+      // empty string a trailing slash produces.
+      var normalised = l.pathname.replace(/\/\/+/g, '/').replace(/\/$/, '');
+      var pathParts = normalised.split('/');
+      // Remove the last segment (the unknown page that caused the 404)
+      pathParts.pop();
+      var basePath = pathParts.join('/') || '/';
+      if (!basePath.endsWith('/')) basePath += '/';
+
+      var homeUrl = l.protocol + '//' + l.host + basePath + l.hash;
+
+      // Wire up all home buttons and start the countdown once DOM is ready.
+      document.addEventListener('DOMContentLoaded', function () {
+        // Update every link that should point home.
+        ['home-btn', 'home-btn-card'].forEach(function (id) {
+          var el = document.getElementById(id);
+          if (el) el.href = homeUrl;
+        });
+
+        // Countdown + auto-redirect after 3 seconds.
+        // Short delay so the user can see what happened before being sent to
+        // the app root — long enough to read, short enough not to feel broken.
+        var countEl = document.getElementById('countdown');
+        var seconds = 3;
+        if (countEl) countEl.textContent = seconds;
+
+        var interval = setInterval(function () {
+          seconds -= 1;
+          if (countEl) countEl.textContent = seconds;
+          if (seconds <= 0) {
+            clearInterval(interval);
+            l.replace(homeUrl);
+          }
+        }, 1000);
+      });
+    })();
+  </script>
+</head>
+<body>
+  <a class="logo" id="home-btn" href="/">
+    <span class="logo-icon">D</span>
+    <span class="logo-text">Docket</span>
+  </a>
+
+  <div class="card">
+    <div class="error-code">404</div>
+    <div class="error-title">This page doesn't exist</div>
+    <p class="error-desc">
+      The URL you followed doesn't match anything in this app.
+      It may have been moved, deleted, or never existed.
+    </p>
+    <a class="home-btn" id="home-btn-card" href="/">Go to Docket</a>
+    <p class="redirect-notice">
+      Redirecting in <span id="countdown">3</span>&nbsp;seconds…
+    </p>
+  </div>
+</body>
+</html>

@@ -1,0 +1,29 @@
+/* Dark theme overrides for the admin panel within docket web */
+#panel_container {
+  --tk-bg: #1a1a1a;
+  --tk-surface: #252525;
+  --tk-border: #333;
+  --tk-text: #e0e0e0;
+  --tk-text-secondary: #999;
+  --tk-primary: #663399;
+  --tk-primary-hover: #7a44b3;
+}
+
+/* Light theme overrides for the admin panel */
+body.light-theme #panel_container {
+  --tk-bg: #f5f5f5;
+  --tk-surface: #ffffff;
+  --tk-border: #ccc;
+  --tk-text: #1a1a1a;
+  --tk-text-secondary: #555;
+  --tk-primary: #663399;
+  --tk-primary-hover: #7a44b3;
+}
+
+/* Remove the panel's own header/close button since we have our own header */
+#panel_container .tk-admin-panel {
+  border: none;
+  background: transparent;
+  box-shadow: none;
+}
+

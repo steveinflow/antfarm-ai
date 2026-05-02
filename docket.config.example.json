@@ -1,0 +1,55 @@
+{
+  "firebaseKeyPath": "./serviceAccountKey.json",
+  "webFirebaseConfig": {
+    "apiKey": "YOUR_FIREBASE_WEB_API_KEY",
+    "authDomain": "YOUR_PROJECT_ID.firebaseapp.com",
+    "projectId": "YOUR_PROJECT_ID",
+    "storageBucket": "YOUR_PROJECT_ID.firebasestorage.app",
+    "messagingSenderId": "YOUR_MESSAGING_SENDER_ID",
+    "appId": "YOUR_APP_ID"
+  },
+  "defaults": {
+    "userId": "YOUR_FIREBASE_AUTH_UID",
+    "adminEmail": "you@example.com"
+  },
+  "projects": {
+    "example-app": {
+      "repoPath": "/absolute/path/to/your/app",
+      "autoDeploy": true,
+      "canaryDeployCommand": "npm run deploy:canary",
+      "promoteCommand": "npm run promote:canary"
+    }
+  },
+  "deploy": {
+    "pagesBaseUrl": "https://your-username.github.io/projects",
+    "pagesRepoPath": "/absolute/path/to/your-username.github.io"
+  },
+  "orchestrator": {
+    "maxWorkers": 4,
+    "model": "claude-sonnet-4-6",
+    "workerIdleTimeoutMs": 1800000
+  },
+  "advisor": {
+    "engineer": {
+      "intervalHours": 12,
+      "reviewGate": true,
+      "model": "claude-haiku-4-5-20251001"
+    },
+    "design": {
+      "intervalHours": 8,
+      "reviewGate": true,
+      "model": "claude-opus-4-6"
+    },
+    "product": {
+      "intervalHours": 24,
+      "reviewGate": true
+    },
+    "projects": {
+      "example-app": {
+        "repoPath": "/absolute/path/to/your/app",
+        "scanPaths": ["src"],
+        "appUrl": "https://your-deploy-url.example.com/"
+      }
+    }
+  }
+}

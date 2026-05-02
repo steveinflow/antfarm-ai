@@ -1,0 +1,18 @@
+{
+  "name": "@docket/cli",
+  "version": "0.4.462",
+  "type": "module",
+  "bin": {
+    "docket": "./bin/tickets.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/claude-agent-sdk": "*",
+    "@docket/core": "*",
+    "firebase-admin": "^13.0.0"
+  },
+  "files": [
+    "bin",
+    "src"
+  ],
+  "license": "MIT"
+}

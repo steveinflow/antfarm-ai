@@ -1,0 +1,27 @@
+{
+  "name": "@docket/web",
+  "version": "0.4.465",
+  "private": true,
+  "scripts": {
+    "build": "webpack --mode production",
+    "build:canary": "DOCKET_ENV=canary webpack --mode production",
+    "start": "webpack serve --mode development --open",
+    "watch": "webpack --mode development --watch",
+    "deploy": "npm run build && rsync -av --delete --exclude='.git' dist/ \"$DOCKET_DEPLOY_TARGET\"/projects/docket/ && (cd \"$DOCKET_DEPLOY_TARGET\" && git reset HEAD -- . && git add projects/docket && (git diff --cached --quiet || git commit -m 'Deploy docket app') && git push origin master) && git push origin master",
+    "deploy:canary": "npm run build:canary && rsync -av --delete --exclude='.git' dist/ \"$DOCKET_DEPLOY_TARGET\"/projects/docket-canary/ && (cd \"$DOCKET_DEPLOY_TARGET\" && git reset HEAD -- . && git add projects/docket-canary && (git diff --cached --quiet || git commit -m 'Deploy docket canary') && git push origin master) && git push origin master",
+    "deploy:rules": "firebase deploy --only firestore",
+    "promote:canary": "rsync -av --delete --exclude='.git' \"$DOCKET_DEPLOY_TARGET\"/projects/docket-canary/ \"$DOCKET_DEPLOY_TARGET\"/projects/docket/ && (cd \"$DOCKET_DEPLOY_TARGET\" && git reset HEAD -- . && git add projects/docket && (git diff --cached --quiet || git commit -m 'Promote docket canary to release') && git push origin master)"
+  },
+  "dependencies": {
+    "@docket/admin-panel": "file:../packages/admin-panel",
+    "@docket/core": "file:../packages/core",
+    "firebase": "^9.6.1"
+  },
+  "devDependencies": {
+    "css-loader": "^7.1.2",
+    "style-loader": "^4.0.0",
+    "webpack": "^5.97.0",
+    "webpack-cli": "^6.0.0",
+    "webpack-dev-server": "^5.2.0"
+  }
+}

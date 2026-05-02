@@ -1,0 +1,711 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    match /projects/{projectId} {
+      allow read: if request.auth != null;
+      // Any authenticated user may create a new project, provided they include
+      // their own email in adminEmails (so the creator is an admin of the project).
+      allow create: if request.auth != null
+                    && request.auth.token.email in request.resource.data.adminEmails;
+      // Admins can update or delete an existing project document.
+      allow update, delete: if request.auth != null
+                   && request.auth.token.email in resource.data.adminEmails;
+      // Any authenticated user may increment nextTicketNumber (needed when creating a ticket).
+      allow update: if request.auth != null
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['nextTicketNumber']);
+      // Any authenticated user may update advisorContext and/or activePresetId (and updatedAt)
+      // for the EPD Advisor panel. advisorContext is capped at 4,000 characters.
+      // activePresetId may be null (no active preset) or a string (preset doc ID).
+      allow update: if request.auth != null
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['advisorContext', 'activePresetId', 'updatedAt'])
+                    && (!('advisorContext' in request.resource.data)
+                        || (request.resource.data.advisorContext is string
+                            && request.resource.data.advisorContext.size() <= 4000))
+                    && (!('activePresetId' in request.resource.data)
+                        || request.resource.data.activePresetId == null
+                        || request.resource.data.activePresetId is string);
+      // DK-302: Any authenticated user may update the Current Priorities field (and prioritiesUpdatedAt, updatedAt).
+      // Priorities is a short free-text field (max 500 chars) scoped per project.
+      // Injected into all advisor persona system prompts when non-empty.
+      // Gated to authenticated users only — same access level as advisorContext.
+      allow update: if request.auth != null
+                    && request.resource.data.diff(resource.data).affectedKeys()
+                         .hasOnly(['priorities', 'prioritiesUpdatedAt', 'updatedAt'])
+                    && (!('priorities' in request.resource.data)
+                        || (request.resource.data.priorities is string
+                            && request.resource.data.priorities.size() <= 500))
+                    && (!('prioritiesUpdatedAt' in request.resource.data)
+                        || request.resource.data.prioritiesUpdatedAt == null
+                        || request.resource.data.prioritiesUpdatedAt is string);
+      // Project admins may update per-project advisor settings (pause, interval, ticketCap,
+      // savedFocusPrompt per persona). Gated to admins only — these settings affect how AI
+      // generates tickets and must not be writable by arbitrary collaborators.
+      // The advisor daemon also clears savedFocusPrompt via Admin SDK (bypasses rules).
+      allow update: if request.auth != null
+                    && request.auth.token.email in resource.data.adminEmails
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advisorSettings', 'updatedAt'])
+                    && (!('advisorSettings' in request.resource.data)
+                        || request.resource.data.advisorSettings is map);
+      // DK-133: Project admins may update personaInstructions (and updatedAt).
+      // Gated to admins only — collaborators must not be able to poison persona instructions
+      // since they affect all ticket generation for the project.
+      // SECURITY NOTE: personaInstructions strings are injected into AI system prompts at runtime.
+      // Restrict writes to admins only. See packages/advisor/src/prompt-builder.js for server-side
+      // sanitization. Warn downstream deployers: permissive rules allow any authenticated user to
+      // redirect agent behavior — always gate to admin roles.
+      // DK-133: Limit increased from 2000 to 4000 chars to match UI.
+      allow update: if request.auth != null
+                    && request.auth.token.email in resource.data.adminEmails
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['personaInstructions', 'updatedAt'])
+                    && (!('personaInstructions' in request.resource.data)
+                        || (request.resource.data.personaInstructions is map
+                            && (!('engineer' in request.resource.data.personaInstructions)
+                                || request.resource.data.personaInstructions.engineer is string
+                                   && request.resource.data.personaInstructions.engineer.size() <= 4000)
+                            && (!('design' in request.resource.data.personaInstructions)
+                                || request.resource.data.personaInstructions.design is string
+                                   && request.resource.data.personaInstructions.design.size() <= 4000)
+                            && (!('product' in request.resource.data.personaInstructions)
+                                || request.resource.data.personaInstructions.product is string
+                                   && request.resource.data.personaInstructions.product.size() <= 4000)));
+      // DK-301: Project admins may update per-project advisor focus areas (topics + paths per persona).
+      // Stored under the `advisor` map field alongside other DK-101 focus data.
+      // Gated to admins only — focus constraints narrow what AI surfaces and must not be
+      // writable by arbitrary collaborators. The daemon reads these and injects them into prompts.
+      // Validation: advisor must be a map (shape is enforced server-side in start-advisor.js).
+      allow update: if request.auth != null
+                    && request.auth.token.email in resource.data.adminEmails
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advisor'])
+                    && (!('advisor' in request.resource.data)
+                        || request.resource.data.advisor is map);
+      // DK-112: Project admins may update per-persona topic exclusion rules (and updatedAt).
+      // SECURITY NOTE: Writes to advisor.topicExclusions are restricted to authenticated admins
+      // because these strings are injected verbatim into AI system prompts at runtime.
+      // Leaving this path open to non-admins is a prompt injection risk — a malicious user could
+      // craft an exclusion rule that manipulates the model's behavior.
+      // Self-hosters: ensure adminEmails is correctly populated before opening this project to
+      // collaborators. See packages/advisor/src/prompt-builder.js for server-side sanitization.
+      // Stored at projects/{id}.advisor.topicExclusions.{engineer,design,product}: string[]
+      // Validation: topicExclusions must be a map whose persona keys contain lists.
+      // Content validation (max 100 chars per rule, max 25 rules, injection pattern rejection)
+      // is enforced server-side in prompt-builder.js — Firestore rules validate shape only.
+      allow update: if request.auth != null
+                    && request.auth.token.email in resource.data.adminEmails
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advisor', 'updatedAt'])
+                    && ('advisor' in request.resource.data)
+                    && (request.resource.data.advisor is map)
+                    && ('topicExclusions' in request.resource.data.advisor)
+                    && (request.resource.data.advisor.topicExclusions is map)
+                    && (!('engineer' in request.resource.data.advisor.topicExclusions)
+                        || request.resource.data.advisor.topicExclusions.engineer is list)
+                    && (!('design' in request.resource.data.advisor.topicExclusions)
+                        || request.resource.data.advisor.topicExclusions.design is list)
+                    && (!('product' in request.resource.data.advisor.topicExclusions)
+                        || request.resource.data.advisor.topicExclusions.product is list);
+      // DK-105: Project admins may update per-project advisor emphasis weights (and updatedAt).
+      // Gated to admins only — weights affect what the AI surfaces, same risk tier as personaInstructions.
+      // Validated: weights must be a map; each persona key maps to a map of concern keys → int 1–5.
+      // Only the six allowlisted concern keys are accepted. User-supplied key names are never written.
+      // Note: Firestore rules cannot enumerate map keys exhaustively, so we validate the shape
+      // (is map, values are integers in [1,5]) and rely on the server-side allowlist in weight-builder.js
+      // to ignore any keys outside the defined set when reading. The client SDK strips invalid keys
+      // before writing. This defense-in-depth approach matches the existing personaInstructions pattern.
+      allow update: if request.auth != null
+                    && request.auth.token.email in resource.data.adminEmails
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['weights', 'updatedAt'])
+                    && (!('weights' in request.resource.data)
+                        || (request.resource.data.weights is map
+                            && (!('engineer' in request.resource.data.weights)
+                                || (request.resource.data.weights.engineer is map
+                                    && request.resource.data.weights.engineer.keys().hasOnly(['security', 'performance', 'maintainability'])))
+                            && (!('design' in request.resource.data.weights)
+                                || (request.resource.data.weights.design is map
+                                    && request.resource.data.weights.design.keys().hasOnly(['layout', 'copy', 'flow'])))
+                            && (!('product' in request.resource.data.weights)
+                                || (request.resource.data.weights.product is map
+                                    && request.resource.data.weights.product.keys().hasOnly(['user_value', 'feasibility', 'strategic_fit'])))));
+
+      // DK-118: Project admins may update per-project advisor persona toggles (and updatedAt).
+      // Stored at projects/{projectId}.advisor.personas.{engineer,design,product}.
+      // Gated to admins only — these settings control which AI personas run for the project.
+      // The worst-case blast radius of a misconfigured rule here is disabling analysis on a
+      // project someone doesn't own — low severity, but admin-gated per spec.
+      // Note: Firestore rules see dot-notation field updates as an update to the top-level
+      // 'advisor' key. The 'advisor' map may contain other sub-maps (e.g. advisor.projects
+      // for focus areas) — we only validate the personas sub-map. Other existing sub-keys
+      // are preserved untouched by the dot-notation partial update.
+      allow update: if request.auth != null
+                    && request.auth.token.email in resource.data.adminEmails
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advisor', 'updatedAt'])
+                    && ('advisor' in request.resource.data)
+                    && (request.resource.data.advisor is map)
+                    && ('personas' in request.resource.data.advisor)
+                    && (request.resource.data.advisor.personas is map)
+                    && (request.resource.data.advisor.personas.keys().hasOnly(['engineer', 'design', 'product', 'engineerDisabledAt', 'designDisabledAt', 'productDisabledAt']));
+
+      // DK-124: Project admins may update per-project advisor focus area pins (advisorPins).
+      // Stored at projects/{projectId}.advisorPins.{engineer,design} as string[].
+      // SECURITY: Gated to admins only — these strings are used as filesystem globs (engineer)
+      // or URL paths (design) in the advisor worker process, which has filesystem access.
+      // Globe injection risk: server-side re-validation in files.js (validatePinGlob) and
+      // design.js ensures only safe relative paths are used even if Firestore is bypassed.
+      // Firestore rules validate shape only (is list). Content limits (max 20 items, max 64
+      // chars per engineer glob, max 200 chars per design path) are enforced server-side.
+      // Staleness warning field (_stalenessWarning) may be a map written by admin panel; also allowed here.
+      allow update: if request.auth != null
+                    && request.auth.token.email in resource.data.adminEmails
+                    && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['advisorPins', 'updatedAt'])
+                    && ('advisorPins' in request.resource.data)
+                    && (request.resource.data.advisorPins is map)
+                    && (!('engineer' in request.resource.data.advisorPins)
+                        || request.resource.data.advisorPins.engineer is list)
+                    && (!('design' in request.resource.data.advisorPins)
+                        || request.resource.data.advisorPins.design is list);
+
+      match /tickets/{ticketId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+                      && request.auth.uid == request.resource.data.userId
+                      // Clients may not set clusterIds — server-only field
+                      && !('clusterIds' in request.resource.data);
+        // DK-356: Allow non-admin users to accept/reject proposed tickets during triage.
+        // The proposed-ticket rule is checked FIRST and returns early if matched,
+        // avoiding interference with the owner/admin authorization checks below.
+        allow update: if request.auth != null
+                      && resource.data.status == 'proposed'
+                      && request.resource.data.diff(resource.data).affectedKeys().hasOnly(
+                          ['status', 'statusHistory', 'pendingQuestion', 'updatedAt', 'feedback', 'feedbackTimestamp'])
+                      && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['clusterIds']);
+
+        allow update: if request.auth != null
+                      && (request.auth.uid == resource.data.userId
+                          || request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.adminEmails)
+                      // Clients may not write clusterIds — server-only field
+                      && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['clusterIds'])
+                      // Snooze field validation: if snoozedUntil is being set, it must be a string
+                      // (ISO timestamp), must not be blank, and the ticket must be a proposal.
+                      // The service layer enforces future/6-month constraints; this rule is a
+                      // belt-and-suspenders guard against direct Firestore writes.
+                      && (!('snoozedUntil' in request.resource.data.diff(resource.data).affectedKeys())
+                          || request.resource.data.snoozedUntil == null
+                          || (request.resource.data.snoozedUntil is string
+                              && request.resource.data.snoozedUntil.size() > 0
+                              && resource.data.status == 'proposed'))
+                      // Score override field validation: if impact or effort are being set by a client,
+                      // they must be integers within 1–5. score_overridden must be a boolean.
+                      // The server (ticket-service.updateScore) writes these fields too but via Admin SDK
+                      // which bypasses rules. This guard protects against direct client writes.
+                      && (!('impact' in request.resource.data.diff(resource.data).affectedKeys())
+                          || (request.resource.data.impact is int
+                              && request.resource.data.impact >= 1
+                              && request.resource.data.impact <= 5))
+                      && (!('effort' in request.resource.data.diff(resource.data).affectedKeys())
+                          || (request.resource.data.effort is int
+                              && request.resource.data.effort >= 1
+                              && request.resource.data.effort <= 5))
+                      // Feedback field validation (DK-196): if feedback is being written,
+                      // it must be a map with a valid action and a userId that matches the
+                      // authenticated user. Only project members (adminEmails) or the ticket
+                      // owner may write feedback. The undo path writes feedback: null which
+                      // is also allowed (clearing the feedback).
+                      && (!('feedback' in request.resource.data.diff(resource.data).affectedKeys())
+                          || request.resource.data.feedback == null
+                          || (request.resource.data.feedback is map
+                              && request.resource.data.feedback.action in ['accepted', 'rejected']
+                              && request.resource.data.feedback.userId == request.auth.uid))
+                      // Links field validation (DK-142): if links is being written, it must be a
+                      // list (array). Each element must be a map with a type field that is one of
+                      // the three allowed enum values ('blocks', 'related', 'follow-up') and a
+                      // targetId field that is a non-empty string. The hasLinks boolean flag must
+                      // also be a boolean when written. The actual cross-project scoping check
+                      // (ensuring targetId refers to a document in the same project) is enforced
+                      // on the client read path via project-scoped queries — not here, because
+                      // Firestore rules cannot perform document existence lookups in list elements.
+                      && (!('links' in request.resource.data.diff(resource.data).affectedKeys())
+                          || request.resource.data.links is list)
+                      && (!('hasLinks' in request.resource.data.diff(resource.data).affectedKeys())
+                          || request.resource.data.hasLinks is bool)
+                      // incomingLinks field validation (DK-393): denormalized reverse index
+                      // maintained by addLink/removeLink. Must be a list of strings (source docIds)
+                      // when written. This field is written by the same code paths that write links,
+                      // so it inherits the same auth requirements.
+                      && (!('incomingLinks' in request.resource.data.diff(resource.data).affectedKeys())
+                          || request.resource.data.incomingLinks is list);
+        allow delete: if request.auth != null
+                      && request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.adminEmails;
+      }
+
+      // Advisor context presets (DK-193) — named advisorContext configurations per project.
+      // Users can save, apply, and delete presets to quickly switch strategic context.
+      //
+      // Firestore path: projects/{projectId}/advisorTemplates/{templateId}
+      //
+      // Document shape:
+      //   name:           string (max 48 chars, enforced at write)
+      //   advisorContext: string (max 4000 chars)
+      //   createdAt:      timestamp
+      //   updatedAt:      timestamp
+      //
+      // Security: requires authenticated user to have write access to the parent project
+      // (i.e., user email in project adminEmails). Non-admin collaborators may read.
+      match /advisorTemplates/{templateId} {
+        // Any authenticated user may read presets for projects they can access.
+        allow read: if request.auth != null;
+
+        // Create: project admin only; enforce field-level character limits
+        allow create: if request.auth != null
+                      && request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.adminEmails
+                      // name is required, non-empty, max 48 chars
+                      && request.resource.data.name is string
+                      && request.resource.data.name.size() > 0
+                      && request.resource.data.name.size() <= 48
+                      // advisorContext is required, max 4000 chars
+                      && request.resource.data.advisorContext is string
+                      && request.resource.data.advisorContext.size() <= 4000;
+
+        // Update: project admin only; same field constraints
+        allow update: if request.auth != null
+                      && request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.adminEmails
+                      && (!('name' in request.resource.data)
+                          || (request.resource.data.name is string
+                              && request.resource.data.name.size() > 0
+                              && request.resource.data.name.size() <= 48))
+                      && (!('advisorContext' in request.resource.data)
+                          || (request.resource.data.advisorContext is string
+                              && request.resource.data.advisorContext.size() <= 4000));
+
+        // Delete: project admin only
+        allow delete: if request.auth != null
+                      && request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.adminEmails;
+      }
+
+      // Theme clusters — topic clusters derived from ticket keywords at proposal time.
+      // Created and managed server-side only (via Admin SDK / advisor daemon).
+      // Clients may read clusters for display (tags, filter); may not write.
+      match /clusters/{clusterId} {
+        allow read: if request.auth != null;
+        allow write: if false; // server-only via Admin SDK
+      }
+
+      // Rejection feedback loop — stores reviewer rejections of proposed tickets.
+      // Rejections are scoped to a project and influence future advisor proposals.
+      // Only authenticated users who belong to the project (i.e. are in adminEmails)
+      // may write rejections, since rejection writes influence LLM prompt content.
+      // Spec: reason must be one of the four allowed enum values; no free text stored.
+      match /rejections/{rejectionId} {
+        // Readable by authenticated project members (for trend display in advisor panel)
+        allow read: if request.auth != null
+                    && request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.adminEmails;
+        // Writable only by authenticated project admins; reason must be a valid enum value
+        allow create: if request.auth != null
+                      && request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.adminEmails
+                      && request.resource.data.reason in ['off_topic', 'too_small', 'already_covered', 'not_relevant'];
+        allow update: if false; // rejections are write-once (immutable snapshots)
+        allow delete: if request.auth != null
+                      && request.auth.token.email in get(/databases/$(database)/documents/projects/$(projectId)).data.adminEmails;
+      }
+
+      // Accept/reject/snooze signal feedback loop — append-only event log.
+      // Decisions are recorded here and aggregated to improve persona proposals.
+      //
+      // Security notes:
+      // - Any authenticated user may read and write events; triage-panel.js records
+      //   feedback for any user who accepts/rejects/snoozes tickets, and advisor-panel.js
+      //   reads feedback stats for any user viewing the advisor panel.
+      // - Events are append-only: update and delete are disallowed.
+      // - decision must be one of the three valid values; personaId and ticketId
+      //   must be non-empty strings.
+      match /feedbackEvents/{eventId} {
+        allow read: if request.auth != null;
+        allow create: if request.auth != null
+                      && request.resource.data.decision in ['accepted', 'rejected', 'snoozed']
+                      && request.resource.data.personaId is string
+                      && request.resource.data.personaId.size() > 0
+                      && request.resource.data.ticketId is string
+                      && request.resource.data.ticketId.size() > 0;
+        allow update: if false; // events are append-only
+        allow delete: if false; // events are immutable
+      }
+    }
+
+    // Orchestrator configuration (e.g. pool size).
+    // Any authenticated user may read; only authenticated users may write
+    // (the orchestrator writes via service account which bypasses rules).
+    match /orchestrator/{docId} {
+      allow read: if request.auth != null;
+      allow write: if request.auth != null;
+    }
+
+    // EPD Advisor persona state (product, design, engineer, and custom personas).
+    // Reads are open to any authenticated user.
+    // Writes are restricted to authenticated admin users — defined as users whose
+    // email appears in the adminEmails array of the orchestrator/config document.
+    // This prevents arbitrary authenticated users from pausing personas or setting
+    // short intervals that hammer the Claude API.
+    //
+    // Admin email setup: the orchestrator/config document must contain an
+    // adminEmails field (array of strings). Example:
+    //   db.collection('orchestrator').doc('config').set({ adminEmails: ['you@example.com'] }, { merge: true })
+    //
+    // The trigger field ({ requestedAt, focusPrompt, requestedBy }) is written
+    // by the web UI to initiate an on-demand run. Unauthenticated writes are
+    // blocked to prevent unsolicited Claude API calls.
+    //
+    // intervalHours validation: must be an integer in [1, 168]. Both the UI and
+    // these rules enforce this constraint — neither layer alone is sufficient.
+    //
+    // Note: The advisor daemon writes via Admin SDK (service account) which
+    // bypasses these rules entirely.
+    match /advisor/{personaId} {
+      allow read: if request.auth != null;
+
+      // Write is allowed if:
+      // 1. User is authenticated
+      // 2. User's email is in the orchestrator/config adminEmails list, OR the list
+      //    does not yet exist (backwards-compatible until adminEmails is configured)
+      // 3. If intervalHours is being written, it must be a valid integer in [1, 168]
+      // 4. If dedupThreshold is being written, it must be a valid integer in [1, 10]
+      //    (prevents a threshold of 0 from silently disabling dedup)
+      // 5. If runRequestedAt is being written, it must be a string (ISO timestamp)
+      //    or null (cleared by orchestrator). This is the DK-303 on-demand run trigger.
+      //    Unauthenticated writes are blocked to prevent unsolicited Claude API calls.
+      // 6. If allowedHours is being written, it must be a map with valid start/end hours
+      //    and a days array. Validated here to prevent invalid data reaching the daemon.
+      //    null is also allowed (clears the restriction).
+      // 7. If focus is being written (DK-187), it must be null or a map. Fine-grained
+      //    field limits are enforced server-side.
+      // 8. If schedule is being written (DK-195), it must be null or a map with:
+      //    timezone (string), allowedDays (list), windowStart (string), windowEnd (string).
+      //    The daemon validates timezone and HH:MM format on first read; rules do basic
+      //    type checking only (IANA validation requires runtime code, not Firestore rules).
+      allow write: if request.auth != null
+                   && (
+                     !exists(/databases/$(database)/documents/orchestrator/config)
+                     || !('adminEmails' in get(/databases/$(database)/documents/orchestrator/config).data)
+                     || request.auth.token.email in
+                          get(/databases/$(database)/documents/orchestrator/config).data.adminEmails
+                   )
+                   // DK-111: intervalHours now accepts floats >= 0.25 (e.g. 0.25 = 15 min).
+                   // Use `is number` (covers both int and float) with a >= 0.25 floor.
+                   // The daemon enforces >= 0.25 server-side as well for defense-in-depth.
+                   && (!('intervalHours' in request.resource.data)
+                       || request.resource.data.intervalHours == null
+                       || (request.resource.data.intervalHours is number
+                           && request.resource.data.intervalHours >= 0.25
+                           && request.resource.data.intervalHours <= 168))
+                   && (!('dedupThreshold' in request.resource.data)
+                       || (request.resource.data.dedupThreshold is int
+                           && request.resource.data.dedupThreshold >= 1
+                           && request.resource.data.dedupThreshold <= 10))
+                   // runRequestedAt: must be a non-empty string (ISO timestamp) or null.
+                   && (!('runRequestedAt' in request.resource.data)
+                       || request.resource.data.runRequestedAt == null
+                       || (request.resource.data.runRequestedAt is string
+                           && request.resource.data.runRequestedAt.size() > 0))
+                   // allowedHours: must be null or a map with integer start/end (0–23) and days list.
+                   && (!('allowedHours' in request.resource.data)
+                       || request.resource.data.allowedHours == null
+                       || (request.resource.data.allowedHours is map
+                           && request.resource.data.allowedHours.start is int
+                           && request.resource.data.allowedHours.start >= 0
+                           && request.resource.data.allowedHours.start <= 23
+                           && request.resource.data.allowedHours.end is int
+                           && request.resource.data.allowedHours.end >= 0
+                           && request.resource.data.allowedHours.end <= 23
+                           && request.resource.data.allowedHours.days is list))
+                   // DK-187: focus: must be null or a map. Field-level limits (item count, length)
+                   // and injection defense are enforced server-side in focus-validator.js on every
+                   // daemon read. Here we only validate the top-level shape (is map or null) to
+                   // avoid complex per-element validation that Firestore rules cannot express cleanly.
+                   && (!('focus' in request.resource.data)
+                       || request.resource.data.focus == null
+                       || request.resource.data.focus is map)
+                   // schedule (DK-195): must be null or a map with timezone, allowedDays, windowStart, windowEnd.
+                   // Full IANA timezone validation happens in the daemon on first read per cycle.
+                   && (!('schedule' in request.resource.data)
+                       || request.resource.data.schedule == null
+                       || (request.resource.data.schedule is map
+                           && request.resource.data.schedule.timezone is string
+                           && request.resource.data.schedule.timezone.size() > 0
+                           && request.resource.data.schedule.allowedDays is list
+                           && request.resource.data.schedule.windowStart is string
+                           && request.resource.data.schedule.windowStart.size() > 0
+                           && request.resource.data.schedule.windowEnd is string
+                           && request.resource.data.schedule.windowEnd.size() > 0))
+                   // DK-133: customInstructions — global per-persona free-text instructions injected into
+                   // all advisor prompts for this persona across all projects. Falls back to this value
+                   // when a project has no per-project personaInstructions override.
+                   // SECURITY NOTE: This string is injected verbatim into AI system prompts at runtime.
+                   // Restrict writes to admin users only. Treat content as plain text — never render as HTML.
+                   // Downstream deployers: permissive rules on this field allow any authenticated user to
+                   // redirect agent behavior globally. Always gate to admin roles.
+                   && (!('customInstructions' in request.resource.data)
+                       || request.resource.data.customInstructions == null
+                       || (request.resource.data.customInstructions is string
+                           && request.resource.data.customInstructions.size() <= 4000));
+
+      // Per-persona run log subcollection — written by the advisor daemon at
+      // the end of each cycle via Admin SDK (bypasses rules). Authenticated
+      // users may read run history; client writes are not permitted.
+      match /runs/{runId} {
+        allow read: if request.auth != null;
+        allow write: if false; // server-only via Admin SDK
+      }
+
+      // DK-039: Per-persona per-project focus directive subcollection.
+      // Stored at: advisor/{personaId}/projects/{projectId}
+      // Fields: directive (string | null), directiveUpdatedAt (timestamp)
+      //
+      // The focus directive is a short free-text field that narrows what a
+      // specific persona focuses on during its next cycle. Empty/null = no
+      // directive (current behavior). Only injected into LLM prompts — never
+      // used in shell commands, file globs, or system calls.
+      //
+      // Security:
+      // - Writes restricted to authenticated users whose email appears in the
+      //   project's adminEmails list (same tier as personaInstructions). This
+      //   prevents arbitrary collaborators from poisoning persona prompts.
+      // - directive is capped at 500 characters (matches client maxlength and
+      //   server-side sanitizeDirective() in start-advisor.js).
+      // - directive must be a string or null — no other types accepted.
+      //
+      // The advisor daemon reads via Admin SDK (bypasses rules). Reads from the
+      // web UI are permitted for any authenticated user (to display current
+      // directive state in the AdvisorPanel UI).
+      match /projects/{projectId} {
+        allow read: if request.auth != null;
+
+        // Write is allowed if:
+        // 1. User is authenticated
+        // 2. User's email is in the project's adminEmails list
+        // 3. If directive is being written, it must be null or a string ≤ 500 chars
+        // 4. directiveUpdatedAt must be absent, null, or a timestamp
+        allow write: if request.auth != null
+                     && request.auth.token.email in
+                          get(/databases/$(database)/documents/projects/$(projectId)).data.adminEmails
+                     && (!('directive' in request.resource.data)
+                         || request.resource.data.directive == null
+                         || (request.resource.data.directive is string
+                             && request.resource.data.directive.size() <= 500));
+      }
+    }
+
+    // Custom persona definitions — written by authenticated admin users via the web UI.
+    // The advisor daemon reads these at startup to discover user-created personas.
+    // System prompts are stored here since only authenticated users have access.
+    // The daemon reads via Admin SDK (bypasses rules).
+    //
+    // Write/delete is restricted to authenticated admin users — defined as users whose
+    // email appears in the adminEmails array of the orchestrator/config document.
+    // This mirrors the access control on /advisor/{personaId} and prevents arbitrary
+    // authenticated users from injecting custom system prompts into the advisor daemon.
+    //
+    // If no orchestrator/config exists or it has no adminEmails array, any authenticated
+    // user may write (backwards-compatible until adminEmails is configured).
+    match /advisorPersonas/{personaId} {
+      allow read: if request.auth != null;
+
+      allow write: if request.auth != null
+                   && (
+                     !exists(/databases/$(database)/documents/orchestrator/config)
+                     || !('adminEmails' in get(/databases/$(database)/documents/orchestrator/config).data)
+                     || request.auth.token.email in
+                          get(/databases/$(database)/documents/orchestrator/config).data.adminEmails
+                   );
+
+      allow delete: if request.auth != null
+                    && (
+                      !exists(/databases/$(database)/documents/orchestrator/config)
+                      || !('adminEmails' in get(/databases/$(database)/documents/orchestrator/config).data)
+                      || request.auth.token.email in
+                           get(/databases/$(database)/documents/orchestrator/config).data.adminEmails
+                    );
+    }
+
+    // Advisor run history (DK-189) — structured run log written by the advisor daemon
+    // via Admin SDK (service account, bypasses rules). Each document may contain:
+    //   ticketsCreated: string[]  — Firestore ticket IDs created during the run
+    //   ticketsDeduped: { summary, blockedBy }[]  — dedup hits with matched keywords
+    //   ticketsFiltered: { count, reasons }  — skipped proposals with enum reason codes
+    //
+    // Read access is granted to any authenticated user — same level as tickets.
+    // The ticketsDeduped[].blockedBy field references ticket doc IDs; since all
+    // authenticated users can read tickets (including proposed-status), there is
+    // no elevated disclosure risk from this field.
+    //
+    // No client writes permitted — server-only via Admin SDK.
+    match /advisorRuns/{runId} {
+      allow read: if request.auth != null;
+      allow write: if false; // server-only via Admin SDK
+    }
+
+    // Ticket quality feedback — thumbs up/down ratings on advisor-generated tickets.
+    //
+    // Document ID format: {ticketId}_{userId}
+    // Fields written by client: ticketId, projectId, rating
+    // Fields enforced by rules: userId must equal request.auth.uid
+    // Fields joined server-side at aggregation: persona, run metadata
+    //
+    // Security notes:
+    // - userId is always set to request.auth.uid by these rules — never trusted from client.
+    // - The client writes ticketId, projectId, and rating only; persona is joined server-side.
+    // - Rate limiting cannot be enforced by Firestore rules (known v1 gap).
+    //   A Cloud Function intermediary can add rate limiting later if signal integrity
+    //   becomes a concern. For v1, this is accepted and documented.
+    // - Project membership is not yet modeled in Firestore beyond adminEmails; for v1,
+    //   any authenticated user may rate any ticket they can read. This will be tightened
+    //   once project membership is modeled.
+    match /feedback/{feedbackId} {
+      // Authenticated users may read their own feedback documents.
+      // Document ID encodes userId so they can only fetch their own record.
+      allow read: if request.auth != null
+                  && feedbackId.matches('.*_' + request.auth.uid);
+
+      // Create: authenticated user only, userId must match auth.uid,
+      // and rating must be one of the two valid values.
+      allow create: if request.auth != null
+                    && feedbackId.matches('.*_' + request.auth.uid)
+                    && request.resource.data.rating in ['relevant', 'noise']
+                    && !('userId' in request.resource.data);  // userId not written by client
+
+      // Update (re-vote): same constraints as create.
+      // Uses setDoc with merge:true so only rating changes.
+      allow update: if request.auth != null
+                    && feedbackId.matches('.*_' + request.auth.uid)
+                    && request.resource.data.rating in ['relevant', 'noise'];
+
+      // No deletes — feedback is immutable once submitted.
+      allow delete: if false;
+    }
+
+    // Persona config templates — saved by users to reuse advisor persona settings
+    // across multiple projects. Stored per-user so templates are private.
+    //
+    // Firestore path: users/{uid}/personaTemplates/{templateId}
+    //
+    // Document shape:
+    //   name:        string (max 60 chars)
+    //   description: string (max 120 chars, optional)
+    //   createdAt:   timestamp
+    //   lastUsedAt:  timestamp (updated when applied to a project)
+    //   config:      { instructions: string, scope: string, triggers: string }
+    //                each field max 2000 chars
+    //
+    // Security: locked to the owning user — no sharing, no cross-user reads.
+    match /users/{userId}/personaTemplates/{templateId} {
+      // Only the owning user may read their own templates
+      allow read: if request.auth != null && request.auth.uid == userId;
+
+      // Create: user must be the owner; enforce field-level character limits
+      allow create: if request.auth != null
+                    && request.auth.uid == userId
+                    // name is required and ≤ 60 chars
+                    && request.resource.data.name is string
+                    && request.resource.data.name.size() > 0
+                    && request.resource.data.name.size() <= 60
+                    // description is optional but ≤ 120 chars when provided
+                    && (!('description' in request.resource.data)
+                        || (request.resource.data.description is string
+                            && request.resource.data.description.size() <= 120))
+                    // config must be a map with string fields ≤ 2000 chars each
+                    && request.resource.data.config is map
+                    && (!('instructions' in request.resource.data.config)
+                        || (request.resource.data.config.instructions is string
+                            && request.resource.data.config.instructions.size() <= 2000))
+                    && (!('scope' in request.resource.data.config)
+                        || (request.resource.data.config.scope is string
+                            && request.resource.data.config.scope.size() <= 2000))
+                    && (!('triggers' in request.resource.data.config)
+                        || (request.resource.data.config.triggers is string
+                            && request.resource.data.config.triggers.size() <= 2000));
+
+      // Update: same ownership + field validations; allows updating lastUsedAt on apply
+      allow update: if request.auth != null
+                    && request.auth.uid == userId
+                    && (!('name' in request.resource.data)
+                        || (request.resource.data.name is string
+                            && request.resource.data.name.size() > 0
+                            && request.resource.data.name.size() <= 60))
+                    && (!('description' in request.resource.data)
+                        || (request.resource.data.description is string
+                            && request.resource.data.description.size() <= 120))
+                    && (!('config' in request.resource.data)
+                        || (request.resource.data.config is map
+                            && (!('instructions' in request.resource.data.config)
+                                || (request.resource.data.config.instructions is string
+                                    && request.resource.data.config.instructions.size() <= 2000))
+                            && (!('scope' in request.resource.data.config)
+                                || (request.resource.data.config.scope is string
+                                    && request.resource.data.config.scope.size() <= 2000))
+                            && (!('triggers' in request.resource.data.config)
+                                || (request.resource.data.config.triggers is string
+                                    && request.resource.data.config.triggers.size() <= 2000))));
+
+      // Delete: owner only
+      allow delete: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Wildcard path rule required for collectionGroup queries on /tickets.
+    // The performance dashboard queries all tickets across projects using
+    // db.collectionGroup('tickets').where('advisorPersona', ...) to compute
+    // per-persona stats. Firestore requires a matching wildcard rule for this.
+    // Read-only; no writes permitted through this path.
+    match /{path=**}/tickets/{ticketId} {
+      allow read: if request.auth != null;
+      allow write: if false;
+    }
+
+    // Advisor dry-run / preview run request and result documents.
+    //
+    // The web UI writes a request doc (status: 'pending') to trigger a dry run.
+    // The advisor daemon (service account, Admin SDK) claims the doc and writes
+    // the result (proposals) back. The UI subscribes to the doc via onSnapshot.
+    //
+    // Access policy:
+    //   - Users may only read and write their own docs (userId == request.auth.uid).
+    //   - The daemon updates docs via Admin SDK (service account, bypasses rules).
+    //   - The admin-dry-run-meta sub-collection (cooldown metadata) is server-only.
+    //
+    // Rate limiting:
+    //   - Enforced server-side in the advisor daemon (one concurrent run per user,
+    //     60-second cooldown per persona per user). UI-side checks are advisory only.
+    //
+    // Cleanup:
+    //   - The daemon writes a ttl timestamp (24 hours from creation) on every doc.
+    //   - Expired docs are deleted at daemon startup and may also be purged by a
+    //     scheduled Cloud Function. Clients must not rely on docs persisting beyond 24h.
+    match /advisor-dry-runs/{docId} {
+      // Users may read their own dry-run result docs (including proposals output).
+      allow read: if request.auth != null
+                  && resource.data.userId == request.auth.uid;
+
+      // Users may create a new dry-run request for themselves.
+      // Validation:
+      //   - personaId must be a non-empty string (≤ 64 chars)
+      //   - status must be 'pending' (only value allowed at create time)
+      //   - userId must equal the authenticated user's UID
+      allow create: if request.auth != null
+                    && request.resource.data.userId == request.auth.uid
+                    && request.resource.data.status == 'pending'
+                    && request.resource.data.personaId is string
+                    && request.resource.data.personaId.size() > 0
+                    && request.resource.data.personaId.size() <= 64;
+
+      // Users may not update their own dry-run docs — updates come from the daemon only.
+      // Clients may delete their own docs (e.g. to cancel a pending run).
+      allow update: if false;
+      allow delete: if request.auth != null
+                    && resource.data.userId == request.auth.uid;
+    }
+
+    // Cooldown metadata for dry runs — server-only.
+    // Written by the advisor daemon after each completed run.
+    // Clients have no need to read this collection directly.
+    match /advisor-dry-run-meta/{docId} {
+      allow read: if false;
+      allow write: if false; // server-only via Admin SDK
+    }
+  }
+}
