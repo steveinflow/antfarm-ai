@@ -6,75 +6,7 @@
 // Performance dashboard: per-persona stats (generated/accepted/rejected/snoozed)
 //   with 30/90-day filter and CSS sparkline. Inline expansion within each persona card.
 
-import { showConfirmModal } from './confirm-modal.js';
-import { createSaveOnBlur } from './save-on-blur.js';
-import {
-  PERSONAS,
-  PERSONA_INTERVAL_HINTS,
-  PERSONA_DIRECTIVE_PLACEHOLDERS,
-  PERSONA_DIRECTIVE_DESCRIPTIONS,
-  RESERVED_NAMES,
-  CUSTOM_PERSONA_MODELS,
-  SCHEDULE_PRESETS,
-  CUSTOM_PERSONA_STARTER,
-  CONTEXT_EXAMPLES,
-  CONTEXT_KNOWN_BAD,
-  PERSONA_DISPLAY_NAMES,
-  PERSONA_AVATARS,
-} from './advisor/config/personas.js';
-import {
-  PERSONA_CONCERNS,
-  CONCERN_META,
-  WEIGHT_PRESETS,
-} from './advisor/config/concerns.js';
-import { DEFAULT_SOUL_PROMPTS } from './advisor/config/soul-prompts.js';
-import {
-  ERROR_REASON_LABELS,
-  FILTER_REASON_LABELS,
-  REJECTION_REASON_LABELS,
-  REJECTION_REASON_ICONS,
-  HEALTH_META,
-} from './advisor/config/labels.js';
-import {
-  ACCEPTED_STATUSES,
-  REJECTED_STATUSES,
-} from './advisor/config/statuses.js';
 import { el } from './advisor/ui/el.js';
-import {
-  toDate,
-  toMs,
-  daysAgo,
-  formatCountdown,
-  formatRelative,
-  formatHour12,
-  formatDuration,
-  formatRelativeTs,
-  formatAbsolute,
-  formatLastRunLine,
-} from './advisor/ui/format.js';
-import {
-  computeSparkline,
-  computeStats,
-  healthFromRate,
-  buildSparklineSvg,
-  buildSparklineAriaLabel,
-} from './advisor/ui/sparkline.js';
-
-import {
-  getContextQuality,
-  slugifyName,
-  sanitizePromptValue,
-  filterReasonLabel,
-  buildWeightSummary,
-  rejectionCounts,
-  buildWhyText,
-  buildRunTrendText,
-  createAvatarEl,
-} from './advisor/helpers/persona.js';
-import {
-  computeNextRunCountdown,
-  _computeNextRunCountdownLegacy,
-} from './advisor/helpers/countdown.js';
 import { triggerLogMixin } from './advisor/views/trigger-log.js';
 import { runLogMixin } from './advisor/views/run-log.js';
 import { backlogMixin } from './advisor/views/backlog.js';
