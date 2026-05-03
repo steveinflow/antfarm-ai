@@ -19,6 +19,7 @@ import { createUsageMonitor } from './usage-monitor.js';
 import { describeError } from './error-formatter.js';
 import { createOrchestratorState } from './state.js';
 import { createQueue } from './queue.js';
+import { createRenderScheduler } from './render-scheduler.js';
 
 /**
  * Create an orchestrator instance.
@@ -484,17 +485,8 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     return ticketServices.get(projectId);
   }
 
-  // ── Logging ─────────────────────────────────────────────────────
-
   // ── Dashboard/TUI render debounce ──────────────────────────────
-  function scheduleRender() {
-    if (state.renderTimer) return;
-    state.renderTimer = setTimeout(() => {
-      state.renderTimer = null;
-      if (tui.isOpen) tui.render();
-      else if (dashboard.isOpen) dashboard.render();
-    }, 100);
-  }
+  const { scheduleRender } = createRenderScheduler(state, { tui, dashboard });
 
   // ── Worker log flushing to Firestore ────────────────────────────
 
