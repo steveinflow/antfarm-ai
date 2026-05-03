@@ -21,6 +21,7 @@ import { createOrchestratorState } from './state.js';
 import { createQueue } from './queue.js';
 import { createRenderScheduler } from './render-scheduler.js';
 import { createLogFlusher } from './log-flusher.js';
+import { createHeartbeat } from './heartbeat.js';
 
 /**
  * Create an orchestrator instance.
@@ -439,39 +440,10 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
   }
 
   // ── Heartbeat ───────────────────────────────────────────────────
-
-  async function writeHeartbeat() {
-    try {
-      await db.collection('orchestrator').doc('config').set(
-        { lastHeartbeat: new Date().toISOString() },
-        { merge: true }
-      );
-    } catch {
-      // best-effort — don't fail if heartbeat write fails
-    }
-  }
-
-  function startHeartbeat() {
-    // Write immediately on start, then on a regular interval
-    writeHeartbeat();
-    state.heartbeatTimer = setInterval(writeHeartbeat, HEARTBEAT_INTERVAL_MS);
-  }
-
-  async function stopHeartbeat() {
-    if (state.heartbeatTimer) {
-      clearInterval(state.heartbeatTimer);
-      state.heartbeatTimer = null;
-    }
-    // Clear the heartbeat so the web panel knows the orchestrator is offline
-    try {
-      await db.collection('orchestrator').doc('config').set(
-        { lastHeartbeat: null },
-        { merge: true }
-      );
-    } catch {
-      // best-effort
-    }
-  }
+  const { startHeartbeat, stopHeartbeat } = createHeartbeat(state, {
+    db,
+    intervalMs: HEARTBEAT_INTERVAL_MS,
+  });
 
   // ── Ticket service factory ──────────────────────────────────────
 
