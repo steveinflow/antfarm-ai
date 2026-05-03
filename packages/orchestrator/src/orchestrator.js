@@ -22,6 +22,7 @@ import { createRenderScheduler } from './render-scheduler.js';
 import { createLogFlusher } from './log-flusher.js';
 import { createHeartbeat } from './heartbeat.js';
 import { createProvisioning } from './project-provisioning.js';
+import { createRecovery } from './recovery.js';
 
 /**
  * Create an orchestrator instance.
@@ -767,25 +768,11 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
   });
 
   // ── Startup recovery ────────────────────────────────────────────
-
-  async function resetOrphanedTickets() {
-    console.log('[orchestrator] Checking for orphaned in_progress tickets...');
-    writeLogFile('Checking for orphaned in_progress tickets...');
-
-    for (const [projectId] of Object.entries(projects)) {
-      const ticketService = getTicketService(projectId);
-      try {
-        const count = await ticketService.rekickOrchestrator();
-        if (count > 0) {
-          console.log(`[orchestrator] Reset ${count} orphaned ticket(s) in ${projectId}`);
-          writeLogFile(`Reset ${count} orphaned ticket(s) in ${projectId}`);
-        }
-      } catch (err) {
-        console.error(`[orchestrator] Error resetting tickets in ${projectId}: ${err.message}`);
-        writeLogFile(`Error resetting tickets in ${projectId}: ${err.message}`);
-      }
-    }
-  }
+  const { resetOrphanedTickets } = createRecovery(state, {
+    projects,
+    getTicketService,
+    writeLogFile,
+  });
 
   // ── Keyboard handling ───────────────────────────────────────────
 
