@@ -1,447 +1,17 @@
 // @docket/admin-panel — CSS styles
 // All classes prefixed with tk- for isolation.
 // Themeable via CSS custom properties.
+//
+// Per-component CSS chunks live in ./styles/. This file composes them in original order.
+
+import { resetCss } from './styles/reset.css.js';
+import { buttonsCss } from './styles/buttons.css.js';
+import { formCss } from './styles/form.css.js';
+import { filtersCss } from './styles/filters.css.js';
 
 export function getStyles() {
-  return `
-/* ========================================================
-   Ticket Admin Panel — tk- namespaced styles
-   ======================================================== */
-
-/* --- Theme custom properties --- */
-.tk-root {
-  --tk-primary: #4f6bed;
-  --tk-primary-hover: #3b53d1;
-  --tk-bg: #ffffff;
-  --tk-bg-secondary: #f5f6fa;
-  --tk-text: #1a1a2e;
-  --tk-text-secondary: #6b7280;
-  --tk-border: #e0e0e0;
-  --tk-radius: 8px;
-  --tk-transition: 0.2s ease;
-  --tk-danger: #e74c3c;
-  --tk-danger-hover: #c0392b;
-  --tk-success: #27ae60;
-  --tk-success-hover: #1e8449;
-  --tk-warning: #f39c12;
-  --tk-tag-bg: #eef1fb;
-  --tk-tag-text: #4f6bed;
-  --tk-shadow: 0 1px 3px rgba(0,0,0,0.08);
-  --tk-shadow-lg: 0 4px 12px rgba(0,0,0,0.12);
-  --tk-font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-  /* Disabled state — distinct from loading/opacity states */
-  --tk-disabled-bg: #e8e9ec;
-  --tk-disabled-text: #a0a4b0;
-  --tk-disabled-border: #d0d2d8;
-}
-
-.tk-root.tk-theme-dark {
-  --tk-primary: #6b8aff;
-  --tk-primary-hover: #8da4ff;
-  --tk-bg: #1a1a2e;
-  --tk-bg-secondary: #23233d;
-  --tk-text: #e8e8ed;
-  --tk-text-secondary: #9ca3af;
-  --tk-border: #333355;
-  --tk-danger: #ef5350;
-  --tk-danger-hover: #f44336;
-  --tk-success: #4caf50;
-  --tk-success-hover: #66bb6a;
-  --tk-warning: #ffb74d;
-  --tk-tag-bg: #2a2a4a;
-  --tk-tag-text: #8da4ff;
-  --tk-shadow: 0 1px 3px rgba(0,0,0,0.3);
-  --tk-shadow-lg: 0 4px 12px rgba(0,0,0,0.4);
-  /* Disabled state — dark theme */
-  --tk-disabled-bg: #2a2a3e;
-  --tk-disabled-text: #5a5e72;
-  --tk-disabled-border: #333355;
-}
-
-/* --- Root reset --- */
-.tk-root {
-  font-family: var(--tk-font);
-  color: var(--tk-text);
-  background: var(--tk-bg);
-  line-height: 1.5;
-  box-sizing: border-box;
-}
-
-.tk-root *, .tk-root *::before, .tk-root *::after {
-  box-sizing: border-box;
-}
-
-/* --- Layout --- */
-.tk-header {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 16px 16px;
-  margin-bottom: 8px;
-}
-
-.tk-panel-body {
-  padding: 0 16px;
-}
-
-.tk-header-title {
-  font-size: 1.4rem;
-  font-weight: 700;
-  margin: 0;
-}
-
-.tk-header-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
-/* --- Buttons --- */
-.tk-btn {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 8px 16px;
-  font-size: 0.875rem;
-  font-weight: 500;
-  border: none;
-  border-radius: var(--tk-radius);
-  cursor: pointer;
-  transition: background var(--tk-transition), opacity var(--tk-transition);
-  font-family: var(--tk-font);
-  line-height: 1.4;
-}
-
-/* Truly-disabled controls: flat grey fill + muted text — distinct from loading states.
-   Do NOT use opacity here; opacity-fade is reserved for in-flight/loading states. */
-.tk-btn:disabled {
-  background: var(--tk-disabled-bg) !important;
-  color: var(--tk-disabled-text) !important;
-  border-color: var(--tk-disabled-border) !important;
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-/* Loading / in-flight state: opacity fade signals "processing, please wait".
-   Apply .tk-btn-loading alongside the button's variant class while an async
-   operation is running. The button should also be disabled to prevent double-submit. */
-.tk-btn-loading {
-  opacity: 0.65;
-  cursor: wait;
-  pointer-events: none;
-}
-
-.tk-btn-primary {
-  background: var(--tk-primary);
-  color: #fff;
-}
-.tk-btn-primary:hover:not(:disabled) {
-  background: var(--tk-primary-hover);
-}
-
-.tk-btn-danger {
-  background: var(--tk-danger);
-  color: #fff;
-}
-.tk-btn-danger:hover:not(:disabled) {
-  background: var(--tk-danger-hover);
-}
-
-.tk-btn-success {
-  background: var(--tk-success);
-  color: #fff;
-}
-.tk-btn-success:hover:not(:disabled) {
-  background: var(--tk-success-hover);
-}
-
-.tk-btn-outline {
-  background: transparent;
-  color: var(--tk-text);
-  border: 1px solid var(--tk-border);
-}
-.tk-btn-outline:hover:not(:disabled) {
-  background: var(--tk-bg-secondary);
-}
-
-.tk-btn-sm {
-  padding: 4px 10px;
-  font-size: 0.8rem;
-}
-
-.tk-btn-ghost {
-  background: transparent;
-  color: var(--tk-text-secondary);
-  border: 1px solid transparent;
-}
-.tk-btn-ghost:hover:not(:disabled) {
-  background: var(--tk-bg-secondary);
-  color: var(--tk-text);
-  border-color: var(--tk-border);
-}
-
-.tk-btn-critical {
-  background: #c53030;
-  color: #fff;
-  border-color: #c53030;
-}
-.tk-btn-critical:hover:not(:disabled) {
-  background: #9b2c2c;
-  border-color: #9b2c2c;
-}
-.tk-theme-dark .tk-btn-critical {
-  background: #e53e3e;
-  border-color: #e53e3e;
-}
-.tk-theme-dark .tk-btn-critical:hover:not(:disabled) {
-  background: #c53030;
-  border-color: #c53030;
-}
-
-/* --- Ticket Form --- */
-.tk-form {
-  background: var(--tk-bg);
-  border: 1px solid var(--tk-border);
-  border-radius: var(--tk-radius);
-  padding: 20px;
-  margin-bottom: 20px;
-  box-shadow: var(--tk-shadow);
-}
-
-.tk-form-title {
-  font-size: 1.1rem;
-  font-weight: 600;
-  margin: 0 0 16px 0;
-}
-
-.tk-form-row {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 12px;
-}
-
-.tk-form-group {
-  display: flex;
-  flex-direction: column;
-  flex: 1;
-}
-
-.tk-form-group label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: var(--tk-text-secondary);
-  margin-bottom: 4px;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
-}
-
-.tk-form-input,
-.tk-form-select,
-.tk-form-textarea {
-  width: 100%;
-  box-sizing: border-box;
-  padding: 8px 12px;
-  font-size: 0.9rem;
-  border: 1px solid var(--tk-border);
-  border-radius: var(--tk-radius);
-  background: var(--tk-bg);
-  color: var(--tk-text);
-  font-family: var(--tk-font);
-  transition: border-color var(--tk-transition);
-}
-
-.tk-form-input:focus,
-.tk-form-select:focus,
-.tk-form-textarea:focus {
-  outline: none;
-  border-color: var(--tk-primary);
-}
-
-.tk-form-input::placeholder,
-.tk-form-textarea::placeholder {
-  color: var(--tk-text-secondary);
-}
-
-.tk-form-textarea {
-  min-height: 80px;
-  resize: vertical;
-}
-
-.tk-form-error {
-  color: var(--tk-danger, #e53e3e);
-  font-size: 0.85rem;
-  margin-top: 4px;
-}
-
-.tk-form-actions {
-  display: flex;
-  gap: 8px;
-  justify-content: flex-end;
-  margin-top: 12px;
-}
-
-.tk-form-classify-hint {
-  font-size: 0.8rem;
-  color: var(--tk-text-secondary);
-  font-style: italic;
-  margin-top: 4px;
-}
-
-/* --- Critical flag --- */
-.tk-form-critical {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-top: 10px;
-}
-
-.tk-form-critical label {
-  font-size: 0.8rem;
-  font-weight: 600;
-  color: #c53030;
-  cursor: pointer;
-}
-
-/* --- Screenshot Upload --- */
-.tk-screenshot-upload {
-  margin-top: 8px;
-}
-
-.tk-screenshot-upload-label {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 12px;
-  font-size: 0.8rem;
-  border: 1px dashed var(--tk-border);
-  border-radius: var(--tk-radius);
-  cursor: pointer;
-  color: var(--tk-text-secondary);
-  transition: border-color var(--tk-transition), color var(--tk-transition);
-}
-.tk-screenshot-upload-label:hover {
-  border-color: var(--tk-primary);
-  color: var(--tk-primary);
-}
-
-.tk-screenshot-upload input[type="file"] {
-  display: none;
-}
-
-.tk-screenshot-previews {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 8px;
-}
-
-.tk-screenshot-thumb {
-  position: relative;
-  width: 60px;
-  height: 60px;
-  border-radius: 4px;
-  overflow: hidden;
-  border: 1px solid var(--tk-border);
-  cursor: pointer;
-}
-
-.tk-screenshot-thumb img {
-  width: 100%;
-  height: 100%;
-  object-fit: cover;
-}
-
-.tk-screenshot-thumb-remove {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  width: 18px;
-  height: 18px;
-  background: var(--tk-danger);
-  color: #fff;
-  border: none;
-  border-radius: 50%;
-  font-size: 12px;
-  line-height: 18px;
-  text-align: center;
-  cursor: pointer;
-  padding: 0;
-}
-
-/* --- Filter Tabs --- */
-.tk-filters {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  margin-bottom: 16px;
-}
-
-.tk-search-bar {
-  position: relative;
-}
-
-.tk-search-bar input {
-  width: 100%;
-  padding: 10px 12px;
-  font-size: 0.9rem;
-  border: 1px solid var(--tk-border);
-  border-radius: var(--tk-radius);
-  background: var(--tk-bg);
-  color: var(--tk-text);
-  font-family: var(--tk-font);
-  transition: border-color var(--tk-transition);
-}
-
-.tk-search-bar input:focus {
-  outline: none;
-  border-color: var(--tk-primary);
-}
-
-.tk-search-bar input::placeholder {
-  color: var(--tk-text-secondary);
-}
-
-.tk-filter-tabs {
-  display: flex;
-  gap: 16px;
-  flex-wrap: wrap;
-  padding-bottom: 8px;
-  padding-left: 12px;
-  border-bottom: 1px solid var(--tk-border);
-}
-
-.tk-filter-tab {
-  font-size: 0.9rem;
-  font-weight: 500;
-  background: none;
-  border: none;
-  color: var(--tk-text-secondary);
-  cursor: pointer;
-  padding: 4px 0;
-  font-family: var(--tk-font);
-  transition: color var(--tk-transition);
-  position: relative;
-}
-
-.tk-filter-tab:hover {
-  color: var(--tk-text);
-}
-
-.tk-filter-tab.tk-active {
-  color: var(--tk-primary);
-}
-
-.tk-filter-tab.tk-active::after {
-  content: '';
-  position: absolute;
-  bottom: -9px;
-  left: 0;
-  right: 0;
-  height: 2px;
-  background: var(--tk-primary);
-}
-
-/* --- Ticket List --- */
+  return '\n' + (
+    resetCss + '\n' + buttonsCss + '\n' + formCss + '\n' + filtersCss + '\n' + `/* --- Ticket List --- */
 .tk-ticket-list {
   display: flex;
   flex-direction: column;
@@ -1010,8 +580,7 @@ export function getStyles() {
 .tk-note-input::placeholder {
   color: var(--tk-text-secondary);
 }
-
-/* --- Lightbox --- */
+` + '\n' + `/* --- Lightbox --- */
 .tk-lightbox {
   position: fixed;
   inset: 0;
@@ -1190,8 +759,7 @@ export function getStyles() {
   50%  { opacity: 0.4; }
   100% { opacity: 1; }
 }
-
-/* --- Rejection UI --- */
+` + '\n' + `/* --- Rejection UI --- */
 
 /* Suppression notice — shown on proposed tickets that match rejected proposals */
 .tk-suppressed-notice {
@@ -1390,8 +958,7 @@ export function getStyles() {
   outline: 2px solid #fff;
   outline-offset: 2px;
 }
-
-/* --- Evidence Section --- */
+` + '\n' + `/* --- Evidence Section --- */
 
 /* Disclosure toggle button */
 .tk-evidence {
@@ -2009,8 +1576,7 @@ details.tk-reasoning[open] .tk-reasoning-summary-toggle::before {
   margin: 4px 0 0 0;
   line-height: 1.4;
 }
-
-/* --- Advisor Run Log --- */
+` + '\n' + `/* --- Advisor Run Log --- */
 
 .tk-run-log-section {
   margin-top: 24px;
@@ -2318,8 +1884,7 @@ details.tk-reasoning[open] .tk-reasoning-summary-toggle::before {
   outline: 2px solid var(--tk-primary);
   outline-offset: 1px;
 }
-
-/* --- Snooze badge (in ticket header) --- */
+` + '\n' + `/* --- Snooze badge (in ticket header) --- */
 .tk-snoozed-badge {
   display: inline-block;
   font-size: 0.7rem;
@@ -2611,8 +2176,7 @@ details.tk-reasoning[open] .tk-reasoning-summary-toggle::before {
 .tk-theme-dark .tk-timeline-item-snooze .tk-timeline-status {
   color: #ffb74d;
 }
-
-/* --- Changelog modal --- */
+` + '\n' + `/* --- Changelog modal --- */
 .tk-changelog-overlay {
   position: fixed;
   inset: 0;
@@ -3210,8 +2774,7 @@ details.tk-reasoning[open] .tk-reasoning-summary-toggle::before {
 .tk-theme-dark .tk-ts-scatter-dot {
   fill: #66bb6a;
 }
-
-/* --- Feedback widget --- */
+` + '\n' + `/* --- Feedback widget --- */
 
 /* Container sits below evidence, above timeline */
 .tk-feedback-widget {
@@ -3370,8 +2933,7 @@ details.tk-reasoning[open] .tk-reasoning-summary-toggle::before {
     display: none;
   }
 }
-
-/* ==========================================================
+` + '\n' + `/* ==========================================================
    DK-142 — Dependency & relationship linking
    ========================================================== */
 
@@ -3778,8 +3340,7 @@ details.tk-reasoning[open] .tk-reasoning-summary-toggle::before {
   outline: 2px solid var(--tk-primary);
   outline-offset: 1px;
 }
-
-/* ==========================================================
+` + '\n' + `/* ==========================================================
    DK-113 — Cross-persona convergence highlighting
    ========================================================== */
 
@@ -3923,8 +3484,7 @@ details.tk-reasoning[open] .tk-reasoning-summary-toggle::before {
   background: var(--tk-bg-secondary);
   border-color: var(--tk-border);
 }
-
-/* ==========================================================
+` + '\n' + `/* ==========================================================
    DK-126 — Cross-persona consensus transparency
    ========================================================== */
 
@@ -4111,6 +3671,6 @@ details.tk-reasoning[open] .tk-reasoning-summary-toggle::before {
   outline: 2px solid var(--tk-primary);
   outline-offset: 1px;
   border-radius: 2px;
-}
-`;
+}`
+  ) + '\n';
 }
