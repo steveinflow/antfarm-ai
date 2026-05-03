@@ -7,14 +7,12 @@ import { createTicketService } from '@docket/core';
 import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { startProjectListener, startBlockedTicketListener, startPausedTicketsListener, startCriticalTicketListener } from './listener.js';
-import { spawnWorker, finalizeWorker, resumeWorker } from './worker.js';
-import { createWorktree, cleanupWorktree } from './worktree.js';
+import { cleanupWorktree } from './worktree.js';
 import { promoteCanary } from './deploy.js';
 import { createDashboard } from './dashboard.js';
 import { createTUI } from './tui.js';
 import { createMasterWorker } from './master-worker.js';
 import { createUsageMonitor } from './usage-monitor.js';
-import { describeError } from './error-formatter.js';
 import { createOrchestratorState } from './state.js';
 import { createQueue } from './queue.js';
 import { createRenderScheduler } from './render-scheduler.js';
@@ -207,8 +205,6 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     tui,
     dashboard,
   });
-
-  // ── Worker lifecycle ────────────────────────────────────────────
 
   // ── Worker lifecycle + queue (mutually recursive) ──────────────
   // worker-lifecycle and queue depend on each other:
