@@ -19,6 +19,7 @@ import {
   toISOString,
 } from './format.js';
 import { el } from './el.js';
+import { openLightbox } from './lightbox.js';
 
 // ---------------------------------------------------------------------------
 // TicketToast
@@ -56,21 +57,6 @@ class TicketToast {
   success(msg) { this.show(msg, 'success'); }
   error(msg) { this.show(msg, 'error', 5000); }
   info(msg) { this.show(msg, 'info'); }
-}
-
-// ---------------------------------------------------------------------------
-// Lightbox
-// ---------------------------------------------------------------------------
-
-function openLightbox(src) {
-  const overlay = el('div', { className: 'tk-lightbox', onClick: () => overlay.remove() },
-    el('img', { src }),
-    el('button', {
-      className: 'tk-lightbox-close',
-      onClick: (e) => { e.stopPropagation(); overlay.remove(); },
-    }, '\u00D7'),
-  );
-  document.body.appendChild(overlay);
 }
 
 // ---------------------------------------------------------------------------
