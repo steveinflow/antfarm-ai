@@ -5,21 +5,17 @@ import {
   createTicketService,
   createProjectService,
   createFeedbackService,
-  STATUS_LABELS,
   statusLabel,
 } from '@docket/core';
 import { getStyles } from './styles.js';
 import {
-  esc,
   formatDateCompact,
   formatDate,
   formatDuration,
   formatCost,
-  relativeTime,
   toISOString,
 } from './format.js';
 import { el } from './el.js';
-import { openLightbox } from './lightbox.js';
 import { TicketToast } from './components/ticket-toast.js';
 import { TicketForm } from './components/ticket-form.js';
 import { TicketFilters } from './components/ticket-filters.js';
