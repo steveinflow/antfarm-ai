@@ -20,6 +20,7 @@ import { describeError } from './error-formatter.js';
 import { createOrchestratorState } from './state.js';
 import { createQueue } from './queue.js';
 import { createRenderScheduler } from './render-scheduler.js';
+import { createLogFlusher } from './log-flusher.js';
 
 /**
  * Create an orchestrator instance.
@@ -489,96 +490,13 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
   const { scheduleRender } = createRenderScheduler(state, { tui, dashboard });
 
   // ── Worker log flushing to Firestore ────────────────────────────
-
-  /**
-   * Schedule a debounced flush of new worker log lines to Firestore.
-   * Batches writes so we don't hammer Firestore on every log line.
-   */
-  function scheduleLogFlush(docId) {
-    if (workerLogFlushTimers.has(docId)) return;
-    const timer = setTimeout(() => {
-      workerLogFlushTimers.delete(docId);
-      flushWorkerLog(docId);
-    }, 2000);
-    workerLogFlushTimers.set(docId, timer);
-  }
-
-  function flushWorkerLog(docId) {
-    const lines = workerLogs.get(docId);
-    if (!lines || lines.length === 0) return;
-    const alreadyFlushed = workerLogFlushedCount.get(docId) || 0;
-    const newLines = lines.slice(alreadyFlushed);
-    if (newLines.length === 0) return;
-
-    // Find the project for this docId
-    const workerState = activeWorkers.get(docId) || pausedWorkers.get(docId);
-    const info = ticketInfoCache.get(docId);
-    const projectId = workerState?.projectId || info?.projectId;
-    if (!projectId) return;
-
-    const ticketService = getTicketService(projectId);
-    workerLogFlushedCount.set(docId, lines.length);
-
-    // Keep only the last 500 lines in Firestore to avoid doc size limits.
-    const MAX_LOG_LINES = 500;
-
-    if (lines.length <= MAX_LOG_LINES) {
-      // Fast path: append only the new delta lines using arrayUnion.
-      // This avoids rewriting previously-flushed lines on every flush.
-      ticketService.appendWorkerLog(docId, newLines).catch(err => {
-        writeLogFile(`Failed to append worker log for ${docId.slice(0, 8)}: ${err.message}`);
-      });
-    } else {
-      // Trim path: total lines exceeded the cap — do a full overwrite with
-      // the trimmed set so the stored array stays within document size limits.
-      const allLines = lines.slice(-MAX_LOG_LINES);
-      ticketService.update(docId, { workerLog: allLines }).catch(err => {
-        writeLogFile(`Failed to flush worker log for ${docId.slice(0, 8)}: ${err.message}`);
-      });
-    }
-  }
-
-  /**
-   * Append a log line to the in-memory workerLogs buffer for docId.
-   * Trims the oldest entries when the buffer exceeds MAX_MEMORY_LOG_LINES so
-   * long-running workers do not cause unbounded memory growth.
-   * Also adjusts the flushed-line counter so the next Firestore flush still
-   * sends only the truly new (unflushed) delta, even after a trim.
-   */
-  function appendWorkerLogLine(docId, formatted) {
-    if (!workerLogs.has(docId)) workerLogs.set(docId, []);
-    const lines = workerLogs.get(docId);
-    lines.push(formatted);
-    if (lines.length > MAX_MEMORY_LOG_LINES) {
-      const excess = lines.length - MAX_MEMORY_LOG_LINES;
-      lines.splice(0, excess);
-      // Keep the flushed-count consistent: after trimming, the new logical
-      // position of the first unflushed line has shifted by `excess` rows.
-      // Clamp to zero so we never record a negative count.
-      const prev = workerLogFlushedCount.get(docId) || 0;
-      workerLogFlushedCount.set(docId, Math.max(0, prev - excess));
-    }
-  }
-
-  function onLog(docId, line) {
-    const ts = new Date().toISOString().slice(11, 19);
-    const formatted = `[${ts}] ${line}`;
-    // Don't write to stdout when TUI or dashboard is open — it corrupts the display.
-    // All output goes to log file + workerLogs.
-    if (!tui.isOpen && !dashboard.isOpen) console.log(formatted);
-    writeLogFile(`[${docId.slice(0, 8)}] ${line}`);
-    appendWorkerLogLine(docId, formatted);
-    scheduleLogFlush(docId);
-  }
-
-  function onWorkerLog(docId, line) {
-    const ts = new Date().toISOString().slice(11, 19);
-    const formatted = `[${ts}] ${line}`;
-    writeLogFile(`[${docId.slice(0, 8)}] ${line}`);
-    appendWorkerLogLine(docId, formatted);
-    scheduleLogFlush(docId);
-    scheduleRender();
-  }
+  const { onLog, onWorkerLog } = createLogFlusher(state, {
+    writeLogFile,
+    getTicketService,
+    scheduleRender,
+    tui,
+    dashboard,
+  });
 
   // ── Worker lifecycle ────────────────────────────────────────────
 
