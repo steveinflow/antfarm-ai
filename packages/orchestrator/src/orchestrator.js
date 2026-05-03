@@ -10,7 +10,6 @@ import { execFileSync } from 'node:child_process';
 import { startProjectListener, startBlockedTicketListener, startPausedTicketsListener, startCriticalTicketListener } from './listener.js';
 import { spawnWorker, finalizeWorker, resumeWorker } from './worker.js';
 import { createWorktree, cleanupWorktree } from './worktree.js';
-import { createMergeQueueManager } from './merge-queue.js';
 import { promoteCanary } from './deploy.js';
 import { createDashboard } from './dashboard.js';
 import { createTUI } from './tui.js';
@@ -18,6 +17,7 @@ import { runMaintenance } from './maintenance.js';
 import { createMasterWorker } from './master-worker.js';
 import { createUsageMonitor } from './usage-monitor.js';
 import { describeError } from './error-formatter.js';
+import { createOrchestratorState } from './state.js';
 
 /**
  * Create an orchestrator instance.
@@ -33,50 +33,34 @@ import { describeError } from './error-formatter.js';
  */
 export function createOrchestrator({ db, projects, maxWorkers, model, fallbackModel, userId, firebaseKeyPath, workerIdleTimeoutMs, workerCooldownMs = 5 * 60 * 1000, workerStaggerMs, maintenanceIntervalMs = 5 * 60 * 1000, usageCheckIntervalMs = 30 * 60 * 1000, usagePauseThreshold = 90, usageFallbackThreshold = 80, usageCheckToken = null, bypassPermissions = false, pagesBaseUrl = null, pagesRepoPath = null }) {
   // ── State ───────────────────────────────────────────────────────
-  /** @type {Map<string, { projectId, ticketId, worktreeDir, ac, sessionId, startedAt, phase }>} */
-  const activeWorkers = new Map();
-
-  /** @type {Array<{ docId, ticketId, projectId, error, timestamp }>} */
-  const recentErrors = [];
-
-  /** @type {Map<string, { projectId, ticketId, worktreeDir, sessionId, question, unsubscribe }>} */
-  const pausedWorkers = new Map();
-
-  /** @type {Array<{ docId, ticketId, title, projectId }>} */
-  const queue = [];
-
-  /** @type {Map<string, { ticketId, title, projectId }>} */
-  const ticketInfoCache = new Map();
-
-  /** @type {Map<string, string[]>} docId -> log lines */
-  const workerLogs = new Map();
-
-  /** Listener unsubscribe functions */
-  const listenerUnsubs = [];
-
-  /** Set of project IDs that already have Firestore listeners registered */
-  const registeredProjectIds = new Set();
-
-  /** Tickets currently being claimed (between queue.shift and activeWorkers.set) */
-  const claimingTickets = new Set();
-
-  /** Ticket services per project */
-  const ticketServices = new Map();
-
-  /** Merge queue manager */
-  const mergeQueueManager = createMergeQueueManager();
-
-  /** Maximum allowed value for maxWorkers — guards against runaway values from Firestore */
-  const MAX_WORKERS_LIMIT = 128;
-
-  /** Mutable config — shared with dashboard for live updates */
-  const config = { maxWorkers };
-
-  /** Maintenance worker status — updated via Firestore listener */
-  let maintenanceStatus = null;
-
-  /** Advisor persona state — updated via Firestore listener (if advisor is running) */
-  const advisorPersonaState = {}; // personaId -> Firestore doc data
+  // All shared mutable state lives in `state` so each extracted module
+  // can read/write the same single object.  Collections are destructured
+  // for convenience (Maps/Sets/Arrays are mutated in place) while scalars
+  // (e.g. state.maintenanceRunning) are addressed through `state` so
+  // assignments propagate.
+  const state = createOrchestratorState({ maxWorkers });
+  const {
+    activeWorkers,
+    recentErrors,
+    pausedWorkers,
+    queue,
+    ticketInfoCache,
+    workerLogs,
+    listenerUnsubs,
+    registeredProjectIds,
+    claimingTickets,
+    ticketServices,
+    mergeQueueManager,
+    config,
+    advisorPersonaState,
+    lastSeenPromoteCanary,
+    workerLogFlushedCount,
+    workerLogFlushTimers,
+    MAX_WORKERS_LIMIT,
+    MAX_MEMORY_LOG_LINES,
+    HEARTBEAT_INTERVAL_MS,
+    upgradeModel,
+  } = state;
 
   /** Dashboard (classic — accessible via 'd' key) */
   const dashboard = createDashboard({
@@ -87,7 +71,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     workerLogs,
     recentErrors,
     config,
-    get maintenanceStatus() { return maintenanceStatus; },
+    get maintenanceStatus() { return state.maintenanceStatus; },
   });
 
   /** Fancy three-pane TUI — default view */
@@ -99,7 +83,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     workerLogs,
     recentErrors,
     config,
-    maintenanceStatus: () => maintenanceStatus,
+    maintenanceStatus: () => state.maintenanceStatus,
     advisorState: () => advisorPersonaState,
   });
 
@@ -110,39 +94,13 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     onLog: (line) => writeLogFile(line),
   });
 
-  /** Shutdown flag */
-  let shuttingDown = false;
-
-  /** Maintenance scheduling */
-  let maintenanceTimer = null;
-  let maintenanceRunning = false;
-
   // ── Usage monitor ────────────────────────────────────────────────
-  /** Saved maxWorkers before a usage-triggered pause */
-  let savedMaxWorkers = null;
-
-  /** Whether workers are currently using the fallback (Haiku) model due to Sonnet limit */
-  let usingFallbackModel = false;
-
-  /**
-   * Non-Sonnet mode — when true, Sonnet is paused and workers start with haiku.
-   * If a worker determines the task is too complex, it can set requestUpgrade=true
-   * on the ticket and the orchestrator will restart it with the upgradeModel (opus).
-   * Toggled via the 'sonnetPaused' field in orchestrator/config Firestore doc.
-   */
-  let nonSonnetMode = false;
-
-  /**
-   * Model used to upgrade a haiku worker when it signals task complexity.
-   * Defaults to opus when sonnet is paused.
-   */
-  const upgradeModel = 'claude-opus-4-5';
 
   /** Effective model — switches to fallbackModel when Sonnet weekly limit crosses fallbackThreshold,
    *  or to fallbackModel when nonSonnetMode is active. */
   function getEffectiveModel() {
-    if (nonSonnetMode && fallbackModel) return fallbackModel;
-    if (usingFallbackModel && fallbackModel) return fallbackModel;
+    if (state.nonSonnetMode && fallbackModel) return fallbackModel;
+    if (state.usingFallbackModel && fallbackModel) return fallbackModel;
     return model;
   }
 
@@ -153,7 +111,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     token: usageCheckToken,
     writeLog: writeLogFile,
     onPause({ reason, resumeAt }) {
-      if (savedMaxWorkers === null) savedMaxWorkers = config.maxWorkers;
+      if (state.savedMaxWorkers === null) state.savedMaxWorkers = config.maxWorkers;
       config.maxWorkers = 0;
       writeLogFile(`[usage] Pausing — ${reason}`);
       if (resumeAt) {
@@ -162,9 +120,9 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
       scheduleRender();
     },
     onResume() {
-      if (savedMaxWorkers !== null) {
-        config.maxWorkers = savedMaxWorkers;
-        savedMaxWorkers = null;
+      if (state.savedMaxWorkers !== null) {
+        config.maxWorkers = state.savedMaxWorkers;
+        state.savedMaxWorkers = null;
       }
       writeLogFile(`[usage] Resuming — maxWorkers restored to ${config.maxWorkers}`);
       scheduleRender();
@@ -172,13 +130,13 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     },
     onFallback({ reason }) {
       if (!fallbackModel) return; // no fallback model configured — skip
-      usingFallbackModel = true;
+      state.usingFallbackModel = true;
       writeLogFile(`[usage] Falling back to ${fallbackModel} — ${reason}`);
       scheduleRender();
     },
     onFallbackRecover() {
-      if (!usingFallbackModel) return;
-      usingFallbackModel = false;
+      if (!state.usingFallbackModel) return;
+      state.usingFallbackModel = false;
       writeLogFile(`[usage] Sonnet limit recovered — resuming ${model}`);
       scheduleRender();
     },
@@ -191,35 +149,6 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
       ).catch(err => writeLogFile(`[usage] Failed to persist usage data: ${err.message}`));
     },
   });
-
-  /**
-   * Set to true when a maintenance run is requested while one is already running.
-   * The current run will start another pass immediately when it finishes, so that
-   * blocked tickets and "Run Now" clicks are never silently dropped.
-   */
-  let pendingMaintenanceAfterCurrent = false;
-
-  /** Last seen manualTrigger value from Firestore config — used to detect new triggers */
-  let lastSeenManualTrigger = null;
-
-  /** Last seen killSignal value from Firestore config — used to detect kill requests from the web UI */
-  let lastSeenKillSignal = null;
-
-  /** Last seen promoteCanary values per project — used to detect promotion requests from the web UI */
-  const lastSeenPromoteCanary = {}; // projectId -> last seen timestamp string
-
-  /** Debounce timer for blocked-ticket-triggered maintenance */
-  let blockedMaintenanceTimer = null;
-
-  /** Time (ms since epoch) when the last worker was spawned — used to enforce workerStaggerMs */
-  let lastSpawnTime = 0;
-
-  /** Timer handle for a pending staggered dequeue */
-  let staggerTimer = null;
-
-  /** Heartbeat timer — writes lastHeartbeat to Firestore/config every 15 s */
-  let heartbeatTimer = null;
-  const HEARTBEAT_INTERVAL_MS = 60_000;
 
   /** Log file — persistent file for debugging across terminals */
   const logDir = join(import.meta.dirname, '..', 'logs');
@@ -522,13 +451,13 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
   function startHeartbeat() {
     // Write immediately on start, then on a regular interval
     writeHeartbeat();
-    heartbeatTimer = setInterval(writeHeartbeat, HEARTBEAT_INTERVAL_MS);
+    state.heartbeatTimer = setInterval(writeHeartbeat, HEARTBEAT_INTERVAL_MS);
   }
 
   async function stopHeartbeat() {
-    if (heartbeatTimer) {
-      clearInterval(heartbeatTimer);
-      heartbeatTimer = null;
+    if (state.heartbeatTimer) {
+      clearInterval(state.heartbeatTimer);
+      state.heartbeatTimer = null;
     }
     // Clear the heartbeat so the web panel knows the orchestrator is offline
     try {
@@ -557,31 +486,16 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
   // ── Logging ─────────────────────────────────────────────────────
 
   // ── Dashboard/TUI render debounce ──────────────────────────────
-  let renderTimer = null;
   function scheduleRender() {
-    if (renderTimer) return;
-    renderTimer = setTimeout(() => {
-      renderTimer = null;
+    if (state.renderTimer) return;
+    state.renderTimer = setTimeout(() => {
+      state.renderTimer = null;
       if (tui.isOpen) tui.render();
       else if (dashboard.isOpen) dashboard.render();
     }, 100);
   }
 
   // ── Worker log flushing to Firestore ────────────────────────────
-  // Tracks how many lines have been flushed to Firestore per docId.
-  /** @type {Map<string, number>} docId -> number of lines already flushed */
-  const workerLogFlushedCount = new Map();
-  /** @type {Map<string, ReturnType<typeof setTimeout>>} docId -> pending flush timer */
-  const workerLogFlushTimers = new Map();
-
-  /**
-   * Maximum number of log lines kept in memory per worker.
-   * When exceeded, the oldest lines are discarded so the map does not grow
-   * without bound during long-running sessions.  The Firestore flush keeps
-   * its own cap of 500 lines — this in-memory cap is intentionally larger
-   * so the TUI can still display a useful amount of recent history.
-   */
-  const MAX_MEMORY_LOG_LINES = 5000;
 
   /**
    * Schedule a debounced flush of new worker log lines to Firestore.
@@ -679,7 +593,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     // Pause new worker spawns while the master worker is responding to a user message.
     // This ensures the master worker has full context visibility during the conversation.
     if (masterWorker.isResponding()) return false;
-    return activeWorkers.size < config.maxWorkers && !shuttingDown && !maintenanceRunning;
+    return activeWorkers.size < config.maxWorkers && !state.shuttingDown && !state.maintenanceRunning;
   }
 
   /**
@@ -887,7 +801,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
         abortController: ac,
         onLog,
         onWorkerLog,
-        nonSonnetMode,
+        nonSonnetMode: state.nonSonnetMode,
         bypassPermissions,
         onStarted: (worktreeDir) => {
           workerState.worktreeDir = worktreeDir;
@@ -931,7 +845,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
         sessionId: result.sessionId,
         onLog,
         // In non-sonnet mode, the agent can request an upgrade to opus for complex tasks.
-        onUpgrade: nonSonnetMode ? handleUpgrade : null,
+        onUpgrade: state.nonSonnetMode ? handleUpgrade : null,
       });
     } catch (err) {
       activeWorkers.delete(docId);
@@ -1137,7 +1051,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
         onLog,
         onWorkerLog,
         // In non-sonnet mode, include upgrade instructions unless this IS the upgrade session.
-        nonSonnetMode: nonSonnetMode && !ctx._upgradeModel,
+        nonSonnetMode: state.nonSonnetMode && !ctx._upgradeModel,
         bypassPermissions,
         onStarted: (worktreeDir) => {
           workerState.phase = 'running';
@@ -1174,7 +1088,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
         sessionId: result.sessionId,
         onLog,
         // In non-sonnet mode, the agent can request an upgrade to opus for complex tasks.
-        onUpgrade: nonSonnetMode ? handleUpgrade : null,
+        onUpgrade: state.nonSonnetMode ? handleUpgrade : null,
       });
     } catch (err) {
       activeWorkers.delete(docId);
@@ -1254,14 +1168,14 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
   }
 
   function dequeueNext() {
-    if (shuttingDown || queue.length === 0) { scheduleRender(); return; }
+    if (state.shuttingDown || queue.length === 0) { scheduleRender(); return; }
 
     const next = queue[0];
     const isCritical = !!(next && next.critical);
 
     if (isCritical) {
       // Critical tickets bypass the worker cap — but still respect maintenance and master worker.
-      if (maintenanceRunning || masterWorker.isResponding()) { scheduleRender(); return; }
+      if (state.maintenanceRunning || masterWorker.isResponding()) { scheduleRender(); return; }
     } else {
       // Non-critical tickets: gate on worker cap as normal.
       if (!canSpawnWorker()) { scheduleRender(); return; }
@@ -1271,13 +1185,13 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
       // almost always 1 when this runs — we can't rely on queue depth to
       // decide whether to stagger.  Instead, track when we last spawned.
       if (workerStaggerMs > 0) {
-        const elapsed = Date.now() - lastSpawnTime;
+        const elapsed = Date.now() - state.lastSpawnTime;
         if (elapsed < workerStaggerMs) {
           // Already have a stagger timer pending — it will call us when ready.
-          if (!staggerTimer) {
+          if (!state.staggerTimer) {
             const delay = workerStaggerMs - elapsed;
-            staggerTimer = setTimeout(() => {
-              staggerTimer = null;
+            state.staggerTimer = setTimeout(() => {
+              state.staggerTimer = null;
               dequeueNext();
             }, delay);
           }
@@ -1288,7 +1202,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     }
 
     queue.shift();
-    lastSpawnTime = Date.now();
+    state.lastSpawnTime = Date.now();
     claimingTickets.add(next.docId);
     claimAndSpawn(next.docId, next.projectId, next._resume || undefined).catch(err => {
       writeLogFile(`Dequeue error: ${err.stack || err.message}`);
@@ -1297,9 +1211,9 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     });
 
     // If more tickets are already queued, schedule the next start after the stagger delay.
-    if (queue.length > 0 && canSpawnWorker() && !staggerTimer) {
+    if (queue.length > 0 && canSpawnWorker() && !state.staggerTimer) {
       if (workerStaggerMs > 0) {
-        staggerTimer = setTimeout(() => { staggerTimer = null; dequeueNext(); }, workerStaggerMs);
+        state.staggerTimer = setTimeout(() => { state.staggerTimer = null; dequeueNext(); }, workerStaggerMs);
       } else {
         dequeueNext();
       }
@@ -1351,14 +1265,14 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
           dashboard.render();
         }
         if (result === 'maintenance') {
-          if (maintenanceRunning) {
+          if (state.maintenanceRunning) {
             writeLogFile('Maintenance already running — ignoring manual trigger');
           } else {
             writeLogFile('Manual maintenance triggered via keyboard');
             // Cancel the scheduled timer so we don't double-run
-            if (maintenanceTimer) {
-              clearTimeout(maintenanceTimer);
-              maintenanceTimer = null;
+            if (state.maintenanceTimer) {
+              clearTimeout(state.maintenanceTimer);
+              state.maintenanceTimer = null;
             }
             runScheduledMaintenance().catch(err => {
               writeLogFile(`Manual maintenance error: ${err.stack || err.message}`);
@@ -1410,13 +1324,13 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
           tui.render();
         }
         if (result === 'maintenance') {
-          if (maintenanceRunning) {
+          if (state.maintenanceRunning) {
             writeLogFile('Maintenance already running — ignoring manual trigger');
           } else {
             writeLogFile('Manual maintenance triggered via keyboard');
-            if (maintenanceTimer) {
-              clearTimeout(maintenanceTimer);
-              maintenanceTimer = null;
+            if (state.maintenanceTimer) {
+              clearTimeout(state.maintenanceTimer);
+              state.maintenanceTimer = null;
             }
             runScheduledMaintenance().catch(err => {
               writeLogFile(`Manual maintenance error: ${err.stack || err.message}`);
@@ -1533,12 +1447,12 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
   }
 
   async function runScheduledMaintenance() {
-    if (maintenanceRunning || shuttingDown) return;
-    maintenanceRunning = true;
+    if (state.maintenanceRunning || state.shuttingDown) return;
+    state.maintenanceRunning = true;
     // Clear any pending blocked-ticket debounce timer since we're running now
-    if (blockedMaintenanceTimer) {
-      clearTimeout(blockedMaintenanceTimer);
-      blockedMaintenanceTimer = null;
+    if (state.blockedMaintenanceTimer) {
+      clearTimeout(state.blockedMaintenanceTimer);
+      state.blockedMaintenanceTimer = null;
     }
     writeLogFile('Scheduled maintenance starting...');
 
@@ -1574,16 +1488,16 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     } catch (err) {
       writeLogFile(`Scheduled maintenance error: ${err.stack || err.message}`);
     } finally {
-      maintenanceRunning = false;
+      state.maintenanceRunning = false;
       // Allow queued tickets to start now that maintenance has released the worker gate
       dequeueNext();
-      if (shuttingDown) return;
+      if (state.shuttingDown) return;
 
       // If a maintenance run was requested while we were busy (blocked ticket or
       // "Run Now" click), run immediately instead of waiting for the next scheduled
       // interval.
-      if (pendingMaintenanceAfterCurrent || hasMoreProblems) {
-        pendingMaintenanceAfterCurrent = false;
+      if (state.pendingMaintenanceAfterCurrent || hasMoreProblems) {
+        state.pendingMaintenanceAfterCurrent = false;
         const reason = hasMoreProblems ? 'remaining problems found' : 'was requested while busy';
         writeLogFile(`Running follow-up maintenance (${reason})...`);
         // Run on next tick so callers see maintenanceRunning = false first
@@ -1594,7 +1508,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
         }, 0);
       } else {
         // Schedule next periodic run
-        maintenanceTimer = setTimeout(runScheduledMaintenance, maintenanceIntervalMs);
+        state.maintenanceTimer = setTimeout(runScheduledMaintenance, maintenanceIntervalMs);
       }
     }
   }
@@ -1605,26 +1519,26 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
    * rapid successive blocked events).
    */
   function handleBlockedTicket(docId, ticketData, projectId) {
-    if (shuttingDown) return;
+    if (state.shuttingDown) return;
     writeLogFile(`Blocked ticket detected: ${ticketData.ticketId || docId} in ${projectId} — scheduling immediate maintenance`);
 
     // If maintenance is already running, mark a pending run so that it starts
     // again immediately after the current pass completes (rather than silently
     // dropping the request and waiting for the next scheduled interval).
-    if (maintenanceRunning) {
-      pendingMaintenanceAfterCurrent = true;
+    if (state.maintenanceRunning) {
+      state.pendingMaintenanceAfterCurrent = true;
       return;
     }
 
     // Debounce: wait 2 seconds to coalesce multiple rapid blocked events
     // into a single maintenance pass.
-    if (blockedMaintenanceTimer) return;
-    blockedMaintenanceTimer = setTimeout(() => {
-      blockedMaintenanceTimer = null;
+    if (state.blockedMaintenanceTimer) return;
+    state.blockedMaintenanceTimer = setTimeout(() => {
+      state.blockedMaintenanceTimer = null;
       // Cancel the regularly-scheduled timer so we don't double-run
-      if (maintenanceTimer) {
-        clearTimeout(maintenanceTimer);
-        maintenanceTimer = null;
+      if (state.maintenanceTimer) {
+        clearTimeout(state.maintenanceTimer);
+        state.maintenanceTimer = null;
       }
       runScheduledMaintenance();
     }, 2000);
@@ -1701,12 +1615,12 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
         }
         // Pre-seed so the initial onSnapshot doesn't re-fire an old trigger
         if (configData.manualTrigger) {
-          lastSeenManualTrigger = configData.manualTrigger;
+          state.lastSeenManualTrigger = configData.manualTrigger;
           writeLogFile(`Pre-seeded lastSeenManualTrigger: ${configData.manualTrigger}`);
         }
         // Pre-seed killSignal so an old value doesn't trigger a kill on restart
         if (configData.killSignal) {
-          lastSeenKillSignal = configData.killSignal;
+          state.lastSeenKillSignal = configData.killSignal;
           writeLogFile(`Pre-seeded lastSeenKillSignal: ${configData.killSignal}`);
         }
         // Pre-seed promoteCanary so stale promotion requests don't re-fire on restart
@@ -1720,8 +1634,8 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
         }
         // Restore sonnetPaused so we start in the correct model mode
         if (typeof configData.sonnetPaused === 'boolean') {
-          nonSonnetMode = configData.sonnetPaused;
-          if (nonSonnetMode) {
+          state.nonSonnetMode = configData.sonnetPaused;
+          if (state.nonSonnetMode) {
             writeLogFile(`[non-sonnet] Restored sonnetPaused=true — starting in non-sonnet mode (${fallbackModel || 'haiku'})`);
           }
         }
@@ -1761,9 +1675,9 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
         }
         // Check for sonnetPaused toggle from the web UI
         // When true, workers use haiku by default (non-sonnet mode).
-        if (typeof data.sonnetPaused === 'boolean' && data.sonnetPaused !== nonSonnetMode) {
-          nonSonnetMode = data.sonnetPaused;
-          if (nonSonnetMode) {
+        if (typeof data.sonnetPaused === 'boolean' && data.sonnetPaused !== state.nonSonnetMode) {
+          state.nonSonnetMode = data.sonnetPaused;
+          if (state.nonSonnetMode) {
             writeLogFile(`[non-sonnet] Sonnet paused — workers will use ${fallbackModel || 'haiku'} (upgrade: ${upgradeModel})`);
           } else {
             writeLogFile(`[non-sonnet] Sonnet resumed — workers will use ${model}`);
@@ -1772,25 +1686,25 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
         }
 
         // Check for a kill signal from the web UI
-        if (data.killSignal && data.killSignal !== lastSeenKillSignal) {
-          lastSeenKillSignal = data.killSignal;
+        if (data.killSignal && data.killSignal !== state.lastSeenKillSignal) {
+          state.lastSeenKillSignal = data.killSignal;
           writeLogFile('Kill signal received from web UI — shutting down');
           console.log('\n[orchestrator] Kill signal received from web UI.');
           shutdown().then(() => process.exit(0)).catch(() => process.exit(1));
           return;
         }
         // Check for a manual maintenance trigger from the web UI
-        if (data.manualTrigger && data.manualTrigger !== lastSeenManualTrigger) {
-          lastSeenManualTrigger = data.manualTrigger;
-          if (maintenanceRunning) {
+        if (data.manualTrigger && data.manualTrigger !== state.lastSeenManualTrigger) {
+          state.lastSeenManualTrigger = data.manualTrigger;
+          if (state.maintenanceRunning) {
             // Queue a follow-up run so "Run Now" is never silently dropped
             writeLogFile('Maintenance already running — queuing a follow-up run after current pass');
-            pendingMaintenanceAfterCurrent = true;
+            state.pendingMaintenanceAfterCurrent = true;
           } else {
             writeLogFile('Manual maintenance triggered via web UI');
-            if (maintenanceTimer) {
-              clearTimeout(maintenanceTimer);
-              maintenanceTimer = null;
+            if (state.maintenanceTimer) {
+              clearTimeout(state.maintenanceTimer);
+              state.maintenanceTimer = null;
             }
             runScheduledMaintenance().catch(err => {
               writeLogFile(`Manual maintenance error: ${err.stack || err.message}`);
@@ -1851,7 +1765,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     // Listen to maintenance worker status
     const maintenanceUnsub = db.collection('orchestrator').doc('maintenance').onSnapshot(
       (snap) => {
-        maintenanceStatus = snap.exists ? snap.data() : null;
+        state.maintenanceStatus = snap.exists ? snap.data() : null;
         scheduleRender();
       },
       () => {
@@ -2063,19 +1977,19 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
             // are retried immediately.
             if (!hadRepoPath && nowHasRepoPath) {
               writeLogFile(`[orchestrator] Project "${projectId}" now has repoPath — scheduling maintenance to retry blocked tickets`);
-              if (!maintenanceRunning) {
-                if (blockedMaintenanceTimer) {
-                  clearTimeout(blockedMaintenanceTimer);
-                  blockedMaintenanceTimer = null;
+              if (!state.maintenanceRunning) {
+                if (state.blockedMaintenanceTimer) {
+                  clearTimeout(state.blockedMaintenanceTimer);
+                  state.blockedMaintenanceTimer = null;
                 }
-                blockedMaintenanceTimer = setTimeout(() => {
-                  blockedMaintenanceTimer = null;
+                state.blockedMaintenanceTimer = setTimeout(() => {
+                  state.blockedMaintenanceTimer = null;
                   runScheduledMaintenance().catch(err => {
                     writeLogFile(`[orchestrator] Maintenance error after repoPath set: ${err.stack || err.message}`);
                   });
                 }, 2000);
               } else {
-                pendingMaintenanceAfterCurrent = true;
+                state.pendingMaintenanceAfterCurrent = true;
               }
             }
           }
@@ -2096,7 +2010,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     tui.open();
 
     // Schedule first maintenance run after a short initial delay
-    maintenanceTimer = setTimeout(runScheduledMaintenance, 30 * 1000);
+    state.maintenanceTimer = setTimeout(runScheduledMaintenance, 30 * 1000);
 
     // Start usage monitor (no-ops gracefully if token unavailable)
     usageMonitor.start();
@@ -2113,22 +2027,22 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
   }
 
   async function shutdown() {
-    if (shuttingDown) return;
-    shuttingDown = true;
+    if (state.shuttingDown) return;
+    state.shuttingDown = true;
 
     // Stop usage monitor
     usageMonitor.stop();
 
     // Cancel scheduled maintenance
-    if (maintenanceTimer) {
-      clearTimeout(maintenanceTimer);
-      maintenanceTimer = null;
+    if (state.maintenanceTimer) {
+      clearTimeout(state.maintenanceTimer);
+      state.maintenanceTimer = null;
     }
-    if (blockedMaintenanceTimer) {
-      clearTimeout(blockedMaintenanceTimer);
-      blockedMaintenanceTimer = null;
+    if (state.blockedMaintenanceTimer) {
+      clearTimeout(state.blockedMaintenanceTimer);
+      state.blockedMaintenanceTimer = null;
     }
-    pendingMaintenanceAfterCurrent = false;
+    state.pendingMaintenanceAfterCurrent = false;
 
     // Stop heartbeat and clear it so the web panel knows we're offline
     await stopHeartbeat();
