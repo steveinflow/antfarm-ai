@@ -26,6 +26,7 @@ import { startTicketCloseTriggers } from './trigger-listeners.js';
 import { validateConstraints } from './constraints.js';
 import { validateFocus } from './focus-validator.js';
 import { getValidatedMinConfidence, sanitizeUserHint, sanitizeDirective } from './validators.js';
+import { getCooldownMs, RUN_REQUEST_COOLDOWN_MS } from './cooldowns.js';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
@@ -37,14 +38,6 @@ function log(persona, msg) {
   const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
   console.log(`[${ts}] [${persona}] ${msg}`);
 }
-
-// ── Per-persona cooldown configuration (DK-321) ────────────────────────────
-// Design uses Playwright + Vision (most expensive) — 15-minute cooldown.
-// Engineer and Product — 5-minute cooldown.
-// QA — 5-minute cooldown (same as engineer).
-// Override via environment: ADVISOR_COOLDOWN_MS (global), or ADVISOR_COOLDOWN_DESIGN_MS.
-const COOLDOWN_MS_DEFAULT = Number(process.env.ADVISOR_COOLDOWN_MS) || 5 * 60 * 1000;  // 5 min
-const COOLDOWN_MS_DESIGN   = Number(process.env.ADVISOR_COOLDOWN_DESIGN_MS) || 15 * 60 * 1000; // 15 min
 
 // ── Time window helpers (DK-303) ────────────────────────────────────────────
 // Validates allowedHours config from Firestore before use.
@@ -328,15 +321,6 @@ function getTimezoneOffsetMs(tz, date) {
     return Date.UTC(+yyyy, +mm - 1, +dd, ...timePart.split(':').map(Number));
   };
   return parseAsUTC(localStr) - parseAsUTC(utcStr);
-}
-
-// ── Run-request cooldown enforcement (DK-303) ────────────────────────────────
-// 5-minute cooldown between on-demand runs. Enforced server-side only.
-const RUN_REQUEST_COOLDOWN_MS = 5 * 60 * 1000; // 5 minutes
-
-function getCooldownMs(personaId) {
-  if (personaId === 'design') return COOLDOWN_MS_DESIGN;
-  return COOLDOWN_MS_DEFAULT;
 }
 
 /**
