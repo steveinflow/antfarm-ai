@@ -24,6 +24,7 @@ import { createProvisioning } from './project-provisioning.js';
 import { createRecovery } from './recovery.js';
 import { createWorkerLifecycle } from './worker-lifecycle.js';
 import { createScheduledMaintenance } from './scheduled-maintenance.js';
+import { createKeyboardHandler } from './keyboard.js';
 
 /**
  * Create an orchestrator instance.
@@ -264,145 +265,6 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     writeLogFile,
   });
 
-  // ── Keyboard handling ───────────────────────────────────────────
-
-  function startKeyboardHandler() {
-    if (!process.stdin.isTTY) return;
-
-    process.stdin.setRawMode(true);
-    process.stdin.resume();
-    process.stdin.setEncoding('utf-8');
-
-    process.stdin.on('data', async (key) => {
-      // Classic dashboard is open — delegate (overrides TUI)
-      if (dashboard.isOpen) {
-        const result = dashboard.handleKey(key);
-        if (result === 'quit') {
-          await shutdown();
-          process.exit(0);
-        }
-        if (result === 'rekick') {
-          await resetOrphanedTickets();
-          dashboard.render();
-        }
-        if (result === 'maintenance') {
-          if (state.maintenanceRunning) {
-            writeLogFile('Maintenance already running — ignoring manual trigger');
-          } else {
-            writeLogFile('Manual maintenance triggered via keyboard');
-            // Cancel the scheduled timer so we don't double-run
-            if (state.maintenanceTimer) {
-              clearTimeout(state.maintenanceTimer);
-              state.maintenanceTimer = null;
-            }
-            runScheduledMaintenance().catch(err => {
-              writeLogFile(`Manual maintenance error: ${err.stack || err.message}`);
-            });
-          }
-          dashboard.render();
-        }
-        if (result === 'pool_up') {
-          config.maxWorkers++;
-          writeLogFile(`Max workers increased to ${config.maxWorkers}`);
-          dashboard.render();
-          dequeueNext();
-          db.collection('orchestrator').doc('config').set(
-            { maxWorkers: config.maxWorkers },
-            { merge: true }
-          ).catch(err => writeLogFile(`Failed to sync pool size: ${err.message}`));
-        }
-        if (result === 'pool_down') {
-          config.maxWorkers = Math.max(1, config.maxWorkers - 1);
-          writeLogFile(`Max workers decreased to ${config.maxWorkers}`);
-          dashboard.render();
-          db.collection('orchestrator').doc('config').set(
-            { maxWorkers: config.maxWorkers },
-            { merge: true }
-          ).catch(err => writeLogFile(`Failed to sync pool size: ${err.message}`));
-        }
-        // If classic dashboard closed itself (ESC), return to TUI
-        if (!dashboard.isOpen && result !== 'quit') {
-          tui.open();
-        }
-        return;
-      }
-
-      // Fancy TUI is open — delegate
-      if (tui.isOpen) {
-        // 'd' opens classic dashboard (TUI closes itself via ESC / its own quit)
-        if (key === 'd') {
-          tui.close();
-          dashboard.open();
-          return;
-        }
-        const result = tui.handleKey(key);
-        if (result === 'quit') {
-          await shutdown();
-          process.exit(0);
-        }
-        if (result === 'rekick') {
-          await resetOrphanedTickets();
-          tui.render();
-        }
-        if (result === 'maintenance') {
-          if (state.maintenanceRunning) {
-            writeLogFile('Maintenance already running — ignoring manual trigger');
-          } else {
-            writeLogFile('Manual maintenance triggered via keyboard');
-            if (state.maintenanceTimer) {
-              clearTimeout(state.maintenanceTimer);
-              state.maintenanceTimer = null;
-            }
-            runScheduledMaintenance().catch(err => {
-              writeLogFile(`Manual maintenance error: ${err.stack || err.message}`);
-            });
-          }
-          tui.render();
-        }
-        if (result === 'pool_up') {
-          config.maxWorkers++;
-          writeLogFile(`Max workers increased to ${config.maxWorkers}`);
-          tui.render();
-          dequeueNext();
-          db.collection('orchestrator').doc('config').set(
-            { maxWorkers: config.maxWorkers },
-            { merge: true }
-          ).catch(err => writeLogFile(`Failed to sync pool size: ${err.message}`));
-        }
-        if (result === 'pool_down') {
-          config.maxWorkers = Math.max(1, config.maxWorkers - 1);
-          writeLogFile(`Max workers decreased to ${config.maxWorkers}`);
-          tui.render();
-          db.collection('orchestrator').doc('config').set(
-            { maxWorkers: config.maxWorkers },
-            { merge: true }
-          ).catch(err => writeLogFile(`Failed to sync pool size: ${err.message}`));
-        }
-        return;
-      }
-
-      // Both UIs closed — global shortcuts
-      switch (key) {
-        case 't':
-          tui.open();
-          break;
-        case 'd':
-          dashboard.open();
-          break;
-        case 'q':
-        case '\x03': // Ctrl+C
-          await shutdown();
-          process.exit(0);
-          break;
-        case 'r':
-          await resetOrphanedTickets();
-          break;
-        default:
-          break;
-      }
-    });
-  }
-
   // ── Scheduled Maintenance ────────────────────────────────────────
   const { runScheduledMaintenance, handleBlockedTicket } = createScheduledMaintenance(state, {
     db,
@@ -411,6 +273,18 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     dequeueNext,
     getTicketService,
     maintenanceIntervalMs,
+  });
+
+  // ── Keyboard handling ───────────────────────────────────────────
+  const { startKeyboardHandler } = createKeyboardHandler(state, {
+    db,
+    tui,
+    dashboard,
+    shutdown,
+    resetOrphanedTickets,
+    runScheduledMaintenance,
+    dequeueNext,
+    writeLogFile,
   });
 
   // ── Start / Shutdown ────────────────────────────────────────────
