@@ -39,6 +39,26 @@ import {
   ACCEPTED_STATUSES,
   REJECTED_STATUSES,
 } from './advisor/config/statuses.js';
+import { el } from './advisor/ui/el.js';
+import {
+  toDate,
+  toMs,
+  daysAgo,
+  formatCountdown,
+  formatRelative,
+  formatHour12,
+  formatDuration,
+  formatRelativeTs,
+  formatAbsolute,
+  formatLastRunLine,
+} from './advisor/ui/format.js';
+import {
+  computeSparkline,
+  computeStats,
+  healthFromRate,
+  buildSparklineSvg,
+  buildSparklineAriaLabel,
+} from './advisor/ui/sparkline.js';
 
 /**
  * Return a quality label for the given advisorContext value.
@@ -151,81 +171,6 @@ function createAvatarEl(personaId, status) {
   return wrapper;
 }
 
-function el(tag, attrs, ...children) {
-  const node = document.createElement(tag);
-  if (attrs) {
-    for (const [k, v] of Object.entries(attrs)) {
-      if (k === 'className') { node.className = v; }
-      else if (k === 'htmlFor') { node.htmlFor = v; }
-      else if (k === 'style' && typeof v === 'object') { Object.assign(node.style, v); }
-      else if (k.startsWith('on') && typeof v === 'function') {
-        node.addEventListener(k.slice(2).toLowerCase(), v);
-      } else {
-        node.setAttribute(k, v);
-      }
-    }
-  }
-  for (const c of children) {
-    if (c == null) continue;
-    if (typeof c === 'string') node.appendChild(document.createTextNode(c));
-    else if (Array.isArray(c)) c.forEach(ch => ch && node.appendChild(ch));
-    else node.appendChild(c);
-  }
-  return node;
-}
-
-function formatCountdown(isoStr) {
-  if (!isoStr) return null;
-  const ms = new Date(isoStr).getTime() - Date.now();
-  if (ms <= 0) return 'soon';
-  const totalMins = Math.floor(ms / 60_000);
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
-  if (h > 0) return `${h}h ${m}m`;
-  return `${m}m`;
-}
-
-function formatRelative(isoStr) {
-  if (!isoStr) return null;
-  const ms = Date.now() - new Date(isoStr).getTime();
-  if (ms < 0) return null;
-  const mins = Math.floor(ms / 60_000);
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const h = Math.floor(mins / 60);
-  if (h < 24) return `${h}h ago`;
-  return `${Math.floor(h / 24)}d ago`;
-}
-
-/**
- * Format a UTC hour integer (0–23) as 12-hour local time label.
- * e.g., 9 → "9:00 AM", 18 → "6:00 PM"
- * @param {number} utcHour - integer 0–23 in UTC
- * @returns {string}
- */
-function formatHour12(utcHour) {
-  // Create a UTC date for today at that hour, then format in local time
-  const d = new Date();
-  d.setUTCHours(utcHour, 0, 0, 0);
-  return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' });
-}
-
-/**
- * Build a summary line for the last run, per the DK-303 spec.
- * Format: "Last run 2h ago — 2 tickets created" or "Never run"
- * @param {string|object|null} lastRunAt - Firestore Timestamp or ISO string
- * @param {number|null} lastRunTicketCount - ticket count from last run
- * @returns {string}
- */
-function formatLastRunLine(lastRunAt, lastRunTicketCount) {
-  if (!lastRunAt) return 'Never run';
-  const ago = formatRelativeTs(lastRunAt);
-  const ticketPart = lastRunTicketCount != null
-    ? ` — ${lastRunTicketCount} ticket${lastRunTicketCount === 1 ? '' : 's'} created`
-    : '';
-  return `Last run ${ago || 'recently'}${ticketPart}`;
-}
-
 /**
  * Compute the next scheduled run as a relative countdown string.
  * Per spec (DK-303): read nextRunAt directly from Firestore — orchestrator writes it.
@@ -269,196 +214,6 @@ function _computeNextRunCountdownLegacy(lastRunAt, intervalHours, intervalMinute
   const m = totalMins % 60;
   if (h > 0) return `in ${h}h ${m}m`;
   return `in ${m}m`;
-}
-
-/** Convert a Firestore Timestamp or Date-like value to a JS Date. */
-function toDate(val) {
-  if (!val) return null;
-  if (val instanceof Date) return val;
-  // Firestore Timestamp (has .toDate())
-  if (typeof val.toDate === 'function') return val.toDate();
-  // ISO string or number
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? null : d;
-}
-
-/** Format a relative timestamp from a Firestore Timestamp or Date. */
-function formatRelativeTs(val) {
-  const d = toDate(val);
-  if (!d) return null;
-  return formatRelative(d.toISOString());
-}
-
-/** Format an absolute datetime for aria-label / title attributes. */
-function formatAbsolute(val) {
-  const d = toDate(val);
-  if (!d) return '';
-  return d.toLocaleString();
-}
-
-/** Format durationMs (already rounded to nearest second) as a human string. */
-function formatDuration(ms) {
-  if (!ms && ms !== 0) return '—';
-  const secs = Math.round(ms / 1000);
-  if (secs < 60) return `${secs}s`;
-  const m = Math.floor(secs / 60);
-  const s = secs % 60;
-  return s > 0 ? `${m}m ${s}s` : `${m}m`;
-}
-
-// ── Performance dashboard helpers ────────────────────────────────────────────
-
-/**
- * Compute a UTC ISO string for N days ago from now.
- * @param {number} days
- * @returns {string} ISO date string
- */
-function daysAgo(days) {
-  const d = new Date();
-  d.setDate(d.getDate() - days);
-  return d.toISOString();
-}
-
-/**
- * Convert a Firestore Timestamp or ISO string to milliseconds since epoch.
- * Returns 0 when unresolvable.
- */
-function toMs(val) {
-  if (!val) return 0;
-  if (typeof val === 'number') return val;
-  if (typeof val.toDate === 'function') return val.toDate().getTime();
-  const d = new Date(val);
-  return isNaN(d.getTime()) ? 0 : d.getTime();
-}
-
-/**
- * Determine the acceptance rate health category.
- * >50% → green, 20–50% → yellow, <20% → red.
- * @param {number} rate 0–1
- * @returns {'green'|'yellow'|'red'}
- */
-function healthFromRate(rate) {
-  if (rate > 0.5) return 'green';
-  if (rate >= 0.2) return 'yellow';
-  return 'red';
-}
-
-/**
- * Aggregate tickets into per-week acceptance rate buckets for the sparkline.
- * Returns an array of rate values (0–1) per week, oldest first.
- * Weeks with no tickets produce null (displayed as gap).
- *
- * @param {Array<{status: string, createdAt: *}>} tickets
- * @param {number} windowDays - 30 or 90
- * @returns {Array<number|null>}
- */
-function computeSparkline(tickets, windowDays) {
-  const numWeeks = Math.ceil(windowDays / 7);
-  const buckets = Array.from({ length: numWeeks }, () => ({ accepted: 0, total: 0 }));
-  const now = Date.now();
-  const windowMs = windowDays * 24 * 60 * 60 * 1000;
-
-  for (const t of tickets) {
-    const ms = toMs(t.createdAt);
-    if (!ms) continue;
-    const age = now - ms;
-    if (age < 0 || age > windowMs) continue;
-    // Which week bucket? Week 0 = oldest
-    const weekIdx = numWeeks - 1 - Math.floor(age / (7 * 24 * 60 * 60 * 1000));
-    const idx = Math.max(0, Math.min(numWeeks - 1, weekIdx));
-    buckets[idx].total++;
-    if (ACCEPTED_STATUSES.has(t.status)) buckets[idx].accepted++;
-  }
-
-  return buckets.map(b => b.total === 0 ? null : b.accepted / b.total);
-}
-
-/**
- * Compute aggregate stats from a list of tickets.
- * @param {Array<{status: string}>} tickets
- * @returns {{ generated: number, accepted: number, rejected: number, snoozed: number, proposed: number }}
- */
-function computeStats(tickets) {
-  let accepted = 0, rejected = 0, snoozed = 0, proposed = 0;
-  for (const t of tickets) {
-    if (ACCEPTED_STATUSES.has(t.status)) accepted++;
-    else if (REJECTED_STATUSES.has(t.status)) rejected++;
-    else if (t.status === 'proposed') proposed++;
-    // snoozed: not an explicit status in this system, but if ever added it would go here
-  }
-  return {
-    generated: tickets.length,
-    accepted,
-    rejected,
-    snoozed: 0, // placeholder — no snoozed status exists yet
-    proposed,
-  };
-}
-
-/**
- * Build an SVG sparkline from rate values.
- * Null values produce a gap (no bar).
- *
- * @param {Array<number|null>} rates - 0–1 values or null
- * @param {string} ariaLabel - accessible description
- * @returns {SVGElement}
- */
-function buildSparklineSvg(rates, ariaLabel) {
-  const W = 120, H = 28;
-  const barW = Math.max(2, Math.floor((W - rates.length) / rates.length));
-  const gap = 1;
-
-  const svgNS = 'http://www.w3.org/2000/svg';
-  const svg = document.createElementNS(svgNS, 'svg');
-  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
-  svg.setAttribute('width', String(W));
-  svg.setAttribute('height', String(H));
-  svg.setAttribute('aria-label', ariaLabel);
-  svg.setAttribute('role', 'img');
-  svg.setAttribute('class', 'adv-sparkline');
-
-  // Baseline
-  const baseline = document.createElementNS(svgNS, 'line');
-  baseline.setAttribute('x1', '0');
-  baseline.setAttribute('y1', String(H - 1));
-  baseline.setAttribute('x2', String(W));
-  baseline.setAttribute('y2', String(H - 1));
-  baseline.setAttribute('class', 'adv-sparkline-baseline');
-  svg.appendChild(baseline);
-
-  rates.forEach((rate, i) => {
-    if (rate === null) return; // gap for empty weeks
-    const x = i * (barW + gap);
-    const barH = Math.max(2, Math.round(rate * (H - 4)));
-    const y = H - barH - 1;
-    const color = rate > 0.5 ? 'adv-sparkline-bar-green'
-      : rate >= 0.2 ? 'adv-sparkline-bar-yellow'
-      : 'adv-sparkline-bar-red';
-    const rect = document.createElementNS(svgNS, 'rect');
-    rect.setAttribute('x', String(x));
-    rect.setAttribute('y', String(y));
-    rect.setAttribute('width', String(barW));
-    rect.setAttribute('height', String(barH));
-    rect.setAttribute('class', `adv-sparkline-bar ${color}`);
-    svg.appendChild(rect);
-  });
-
-  return svg;
-}
-
-/**
- * Build an accessible description of a sparkline for screen readers.
- * @param {Array<number|null>} rates
- * @param {number} windowDays
- * @returns {string}
- */
-function buildSparklineAriaLabel(rates, windowDays) {
-  const validRates = rates.filter(r => r !== null);
-  if (validRates.length === 0) return `Acceptance rate data unavailable over ${windowDays} days`;
-  const first = Math.round((validRates[0] ?? 0) * 100);
-  const last = Math.round((validRates[validRates.length - 1] ?? 0) * 100);
-  const trend = last > first ? 'increased' : last < first ? 'decreased' : 'remained stable';
-  return `Acceptance rate ${trend} from ${first}% to ${last}% over ${windowDays} days`;
 }
 
 /**
