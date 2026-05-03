@@ -60,161 +60,21 @@ import {
   buildSparklineAriaLabel,
 } from './advisor/ui/sparkline.js';
 
-/**
- * Return a quality label for the given advisorContext value.
- * Labels: 'minimal' | 'good' | 'specific'
- * Logic mirrors spec: < 50 → minimal, 50-100 → good, > 100 with varied vocab → specific.
- * Short but known-bad strings also resolve to 'minimal'.
- * @param {string} value
- * @returns {'minimal'|'good'|'specific'}
- */
-function getContextQuality(value) {
-  const trimmed = (value || '').trim();
-  if (trimmed.length < 50 || CONTEXT_KNOWN_BAD.includes(trimmed)) return 'minimal';
-  if (trimmed.length < 100) return 'good';
-  return 'specific';
-}
-
-/** Slugify a name for use as a Firestore doc ID */
-function slugifyName(name) {
-  return name
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 64);
-}
-
-/** Strip dangerous prompt-delimiter characters from a string */
-function sanitizePromptValue(str) {
-  if (typeof str !== 'string') return '';
-  return str.replace(/<\/?system>|<\|/g, '').replace(/[\r\u2028\u2029]/g, ' ').trim();
-}
-
-function filterReasonLabel(code) {
-  return FILTER_REASON_LABELS[code] || code;
-}
-
-/** Derive a plain-language summary from a weights map + persona id. */
-function buildWeightSummary(weights, personaId) {
-  const keys = PERSONA_CONCERNS[personaId];
-  if (!keys) return '';
-  const all1 = keys.every(k => (weights[k] ?? 1) === 1);
-  if (all1) return 'All concerns are weighted equally — no emphasis applied.';
-  const sorted = [...keys].sort((a, b) => (weights[b] ?? 1) - (weights[a] ?? 1));
-  const labels = sorted.map(k => CONCERN_META[k]?.label || k);
-  if (labels.length === 1) return `The persona will emphasise ${labels[0]}.`;
-  const last = labels.pop();
-  return `The ${personaId.charAt(0).toUpperCase() + personaId.slice(1)} persona will surface ${labels.join(', ')} findings before ${last}.`;
-}
-
-/**
- * Count rejected items by reason type.
- * @param {Array<{reason: string}>} rejected
- * @returns {object} { reason: count }
- */
-function rejectionCounts(rejected) {
-  const counts = {};
-  for (const item of rejected) {
-    const r = item.reason || 'unknown';
-    counts[r] = (counts[r] || 0) + 1;
-  }
-  return counts;
-}
-
-/**
- * Build a "why was this rejected?" tooltip text for an individual rejection.
- * @param {{reason: string, matchedTicketId?: string, score?: number}} item
- * @returns {string}
- */
-function buildWhyText(item) {
-  if (item.reason === 'duplicate') {
-    return item.matchedTicketId
-      ? `Matched existing ticket: ${item.matchedTicketId}`
-      : 'Too similar to an existing open ticket';
-  }
-  if (item.reason === 'low_confidence') {
-    return item.score != null
-      ? `Confidence score: ${Math.round(item.score * 100)}%`
-      : 'Did not meet the confidence threshold';
-  }
-  if (item.reason === 'threshold') {
-    return 'Filtered by a rejection history rule';
-  }
-  return '';
-}
-
-/**
- * Build a simple 7-run trend summary from the last N runs.
- * Returns text like "7 runs: 12 created, 8 rejected" or null if insufficient data.
- * @param {Array} runs - Array of run records (newest first)
- * @returns {string|null}
- */
-function buildRunTrendText(runs) {
-  const recent = (runs || []).slice(0, 7);
-  if (recent.length < 2) return null;
-  let totalCreated = 0, totalRejected = 0;
-  for (const r of recent) {
-    totalCreated  += Array.isArray(r.created)  ? r.created.length  : (r.proposalsCreated || 0);
-    totalRejected += Array.isArray(r.rejected) ? r.rejected.length : 0;
-  }
-  return `Last ${recent.length} runs: ${totalCreated} created, ${totalRejected} rejected`;
-}
-
-function createAvatarEl(personaId, status) {
-  const avatarData = PERSONA_AVATARS[personaId];
-  if (!avatarData) return null;
-  const isWorking = status === 'running';
-  const svgStr = isWorking ? avatarData.working : avatarData.idle;
-  const wrapper = document.createElement('div');
-  wrapper.className = 'adv-avatar' + (isWorking ? ' adv-avatar-working' : ' adv-avatar-idle');
-  wrapper.innerHTML = svgStr;
-  return wrapper;
-}
-
-/**
- * Compute the next scheduled run as a relative countdown string.
- * Per spec (DK-303): read nextRunAt directly from Firestore — orchestrator writes it.
- * Falls back to computing from lastRunAt + interval when nextRunAt is unavailable.
- * Returns strings like "in 3h 20m", "in 45m", "soon" (past due), or null if no data.
- * @param {string|object|null} nextRunAt - Firestore nextRunAt Timestamp or ISO string
- * @param {string|object|null} lastRunAt - Firestore Timestamp or ISO string (fallback)
- * @param {number|null} intervalHours - run interval in hours (ignored if intervalMinutes set)
- * @param {number|null} [intervalMinutes] - run interval in minutes (takes priority over intervalHours)
- * @returns {string|null}
- */
-function computeNextRunCountdown(nextRunAt, lastRunAt, intervalHours, intervalMinutes) {
-  // Prefer Firestore nextRunAt (written by orchestrator per DK-303 spec)
-  const nextDate = toDate(nextRunAt);
-  if (nextDate) {
-    const remaining = nextDate.getTime() - Date.now();
-    if (remaining <= 0) return 'soon';
-    const totalMins = Math.floor(remaining / 60_000);
-    const h = Math.floor(totalMins / 60);
-    const m = totalMins % 60;
-    if (h > 0) return `in ${h}h ${m}m`;
-    return `in ${m}m`;
-  }
-  // Fallback: compute from lastRunAt + interval
-  return _computeNextRunCountdownLegacy(lastRunAt, intervalHours, intervalMinutes);
-}
-
-/** Legacy countdown computation from lastRunAt + interval (fallback). */
-function _computeNextRunCountdownLegacy(lastRunAt, intervalHours, intervalMinutes) {
-  const intervalMs = (intervalMinutes != null && intervalMinutes > 0)
-    ? intervalMinutes * 60_000
-    : (intervalHours ? intervalHours * 3600_000 : null);
-  if (!lastRunAt || !intervalMs) return null;
-  const lastDate = toDate(lastRunAt);
-  if (!lastDate) return null;
-  const nextMs = lastDate.getTime() + intervalMs;
-  const remaining = nextMs - Date.now();
-  if (remaining <= 0) return 'soon';
-  const totalMins = Math.floor(remaining / 60_000);
-  const h = Math.floor(totalMins / 60);
-  const m = totalMins % 60;
-  if (h > 0) return `in ${h}h ${m}m`;
-  return `in ${m}m`;
-}
+import {
+  getContextQuality,
+  slugifyName,
+  sanitizePromptValue,
+  filterReasonLabel,
+  buildWeightSummary,
+  rejectionCounts,
+  buildWhyText,
+  buildRunTrendText,
+  createAvatarEl,
+} from './advisor/helpers/persona.js';
+import {
+  computeNextRunCountdown,
+  _computeNextRunCountdownLegacy,
+} from './advisor/helpers/countdown.js';
 
 /**
  * AdvisorPanel
