@@ -7,3 +7,5 @@ docket.config.json
 logs/
 .claude/worktrees/
 .env
+claude-config
+rpg/
