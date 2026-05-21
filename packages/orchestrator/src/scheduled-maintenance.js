@@ -118,13 +118,18 @@ export function createScheduledMaintenance(state, deps) {
 
     let hasMoreProblems = false;
     try {
-      const result = await runMaintenance({
+      // Guard against maintenance hanging forever — 10-minute hard timeout
+      const maintenancePromise = runMaintenance({
         db,
         projects,
         dryRun: false,
         allProjects: projects,
         onLog: (msg) => writeLogFile(msg),
       });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('Maintenance timed out after 10 minutes')), 10 * 60 * 1000)
+      );
+      const result = await Promise.race([maintenancePromise, timeoutPromise]);
       hasMoreProblems = result.hasMoreProblems;
     } catch (err) {
       writeLogFile(`Scheduled maintenance error: ${err.stack || err.message}`);

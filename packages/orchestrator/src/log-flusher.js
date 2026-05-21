@@ -106,9 +106,6 @@ export function createLogFlusher(state, deps) {
   function onLog(docId, line) {
     const ts = new Date().toISOString().slice(11, 19);
     const formatted = `[${ts}] ${line}`;
-    // Don't write to stdout when TUI or dashboard is open — it corrupts the display.
-    // All output goes to log file + workerLogs.
-    if (!tui.isOpen && !dashboard.isOpen) console.log(formatted);
     writeLogFile(`[${docId.slice(0, 8)}] ${line}`);
     appendWorkerLogLine(docId, formatted);
     scheduleLogFlush(docId);

@@ -95,7 +95,7 @@ export function createFirestoreListeners(state, deps) {
         handleNewTicket(docId, ticketData, pid);
       },
       onError: (err) => {
-        console.error(`[orchestrator] Listener error for ${projectId}:`, err.message);
+        writeLogFile(`Listener error for ${projectId}: ${err.message}`);
       },
     });
     listenerUnsubs.push(unsub);
@@ -107,7 +107,7 @@ export function createFirestoreListeners(state, deps) {
         handleBlockedTicket(docId, ticketData, pid);
       },
       onError: (err) => {
-        console.error(`[orchestrator] Blocked listener error for ${projectId}:`, err.message);
+        writeLogFile(`Blocked listener error for ${projectId}: ${err.message}`);
       },
     });
     listenerUnsubs.push(blockedUnsub);
@@ -119,7 +119,7 @@ export function createFirestoreListeners(state, deps) {
         handleCriticalUpgrade(docId, ticketData, pid);
       },
       onError: (err) => {
-        console.error(`[orchestrator] Critical listener error for ${projectId}:`, err.message);
+        writeLogFile(`Critical listener error for ${projectId}: ${err.message}`);
       },
     });
     listenerUnsubs.push(criticalUnsub);
@@ -143,12 +143,12 @@ export function createFirestoreListeners(state, deps) {
         }
       },
       onError: (err) => {
-        console.error(`[orchestrator] Paused-tickets listener error for ${projectId}:`, err.message);
+        writeLogFile(`Paused-tickets listener error for ${projectId}: ${err.message}`);
       },
     });
     listenerUnsubs.push(pausedUnsub);
 
-    console.log(`[orchestrator] Listening on ${projectId}`);
+    writeLogFile(`Listening on ${projectId}`);
   }
 
   function subscribeToOrchestratorConfig() {
@@ -184,7 +184,7 @@ export function createFirestoreListeners(state, deps) {
         if (data.killSignal && data.killSignal !== state.lastSeenKillSignal) {
           state.lastSeenKillSignal = data.killSignal;
           writeLogFile('Kill signal received from web UI — shutting down');
-          console.log('\n[orchestrator] Kill signal received from web UI.');
+          writeLogFile('Kill signal received from web UI');
           shutdown().then(() => process.exit(0)).catch(() => process.exit(1));
           return;
         }

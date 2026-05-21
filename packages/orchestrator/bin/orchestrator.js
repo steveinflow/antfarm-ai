@@ -4,7 +4,7 @@
 // Usage: docket-orchestrator --config ./docket.config.json [--user <userId>]
 
 import { resolve, dirname } from 'node:path';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, appendFileSync } from 'node:fs';
 import admin from 'firebase-admin';
 import { createOrchestrator } from '../src/orchestrator.js';
 import { startAdvisor } from '@docket/advisor';
@@ -166,6 +166,21 @@ Options:
 
   await orchestrator.start();
 
+  // ── Silence console after TUI opens ────────────────────────────
+  // The TUI uses the alternate screen buffer. Any console output from
+  // in-process modules (advisor, maintenance) corrupts the display.
+  // Redirect all console output to the orchestrator log file.
+  const logFile = resolve(import.meta.dirname, '..', 'logs', 'orchestrator.log');
+  const silentLog = (...args) => {
+    try {
+      const ts = new Date().toISOString();
+      appendFileSync(logFile, `${ts} ${args.join(' ')}\n`);
+    } catch { /* ignore */ }
+  };
+  console.log = silentLog;
+  console.warn = silentLog;
+  console.error = silentLog;
+
   // ── Start EPD Advisor (if configured) ───────────────────────────
   // If the config contains an "advisor" section, start the Engineer,
   // Design, and Product personas in-process alongside the orchestrator.
@@ -173,7 +188,7 @@ Options:
     try {
       await startAdvisor({ db, advisorConfig: config.advisor });
     } catch (err) {
-      console.error(`[advisor] Failed to start: ${err.message || err}`);
+      silentLog(`[advisor] Failed to start: ${err.message || err}`);
       // Non-fatal — orchestrator continues even if advisor fails to start.
     }
   }

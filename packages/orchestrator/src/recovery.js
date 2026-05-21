@@ -15,7 +15,6 @@ export function createRecovery(_state, deps) {
   const { projects, getTicketService, writeLogFile } = deps;
 
   async function resetOrphanedTickets() {
-    console.log('[orchestrator] Checking for orphaned in_progress tickets...');
     writeLogFile('Checking for orphaned in_progress tickets...');
 
     for (const [projectId] of Object.entries(projects)) {
@@ -23,11 +22,9 @@ export function createRecovery(_state, deps) {
       try {
         const count = await ticketService.rekickOrchestrator();
         if (count > 0) {
-          console.log(`[orchestrator] Reset ${count} orphaned ticket(s) in ${projectId}`);
           writeLogFile(`Reset ${count} orphaned ticket(s) in ${projectId}`);
         }
       } catch (err) {
-        console.error(`[orchestrator] Error resetting tickets in ${projectId}: ${err.message}`);
         writeLogFile(`Error resetting tickets in ${projectId}: ${err.message}`);
       }
     }

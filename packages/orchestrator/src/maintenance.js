@@ -131,7 +131,7 @@ export async function runMaintenance({ db, projects, dryRun = false, allProjects
 
   const summary = `── Maintenance complete — fixed: ${totalFixed}, skipped: ${totalSkipped}, failed: ${totalFailed}, remaining: ${totalRemaining}`;
   collectLog(summary);
-  console.log(`\n${summary}`);
+  if (!onLog) console.log(`\n${summary}`);
 
   // Mark maintenance as complete, publishing the full log for UI inspection
   await publishStatus(db, {
@@ -153,8 +153,8 @@ async function runProjectMaintenance({ projectId, projectConfig, db, dryRun, all
   const repoPath = projectConfig.repoPath;
   const log = (msg) => {
     const line = `[maintenance:${projectId}] ${msg}`;
-    console.log(line);
-    if (onLog) onLog(line);
+    if (!onLog) console.log(line);
+    else onLog(line);
   };
   // updatePhase removed — per-step status writes were wasteful (Firestore write per phase).
   // The run-level publishStatus calls in runMaintenance are sufficient.

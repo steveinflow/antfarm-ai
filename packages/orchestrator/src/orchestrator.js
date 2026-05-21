@@ -311,19 +311,13 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
   // ── Start / Shutdown ────────────────────────────────────────────
 
   async function start() {
-    console.log('[orchestrator] Starting...');
-    console.log(`[orchestrator] Projects: ${Object.keys(projects).join(', ')}`);
-    console.log(`[orchestrator] Max workers: ${maxWorkers}, Model: ${model}`);
-    console.log(`[orchestrator] User: ${userId}`);
-    console.log(`[orchestrator] Idle timeout: ${Math.round(workerIdleTimeoutMs / 1000)}s`);
-    console.log(`[orchestrator] Maintenance interval: ${Math.round(maintenanceIntervalMs / 1000)}s (first run in 30s)`);
-    console.log(`[orchestrator] Auth: ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'OAuth token (Max subscription)' : 'API credits (no CLAUDE_CODE_OAUTH_TOKEN)'}`);
-    console.log(`[orchestrator] Permission mode: ${bypassPermissions ? 'bypassPermissions (FULL BYPASS — operator-enabled)' : 'acceptEdits (default)'}`);
-    console.log(`[orchestrator] Log file: ${logFile}`);
-    console.log('');
     writeLogFile('=== Orchestrator starting ===');
     writeLogFile(`Projects: ${Object.keys(projects).join(', ')}, Max workers: ${maxWorkers}, Model: ${model}`);
+    writeLogFile(`User: ${userId}`);
     writeLogFile(`Idle timeout: ${Math.round(workerIdleTimeoutMs / 1000)}s`);
+    writeLogFile(`Maintenance interval: ${Math.round(maintenanceIntervalMs / 1000)}s (first run in 30s)`);
+    writeLogFile(`Auth: ${process.env.CLAUDE_CODE_OAUTH_TOKEN ? 'OAuth (Max)' : 'API credits'}`);
+    writeLogFile(`Log file: ${logFile}`);
     if (bypassPermissions) {
       writeLogFile('WARNING: bypassPermissions=true — all SDK permission checks disabled for worker sessions');
     }
@@ -347,7 +341,6 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
           { merge: true }
         );
         writeLogFile('Reset stale maintenance status (was stuck in running state)');
-        console.log('[orchestrator] Reset stale maintenance status (was stuck in running state)');
       }
     } catch (err) {
       writeLogFile(`Failed to reset maintenance status: ${err.message}`);
@@ -450,8 +443,6 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     // Start keyboard handler
     startKeyboardHandler();
 
-    console.log('');
-
     // Open fancy TUI by default (press 'd' to switch to classic dashboard)
     tui.open();
 
@@ -499,7 +490,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
     }
     workerLogFlushTimers.clear();
 
-    console.log('\n[orchestrator] Shutting down...');
+    writeLogFile('Shutting down...');
 
     // Stop master worker listener
     masterWorker.stop();
@@ -516,7 +507,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
 
     // Abort all active workers and save WIP
     for (const [docId, worker] of activeWorkers) {
-      console.log(`[orchestrator] Aborting worker for ${worker.ticketId || docId}`);
+      writeLogFile(`Aborting worker for ${worker.ticketId || docId}`);
       if (worker.ac) worker.ac.abort();
 
       // Save synthetic WIP if the worker never saved one
@@ -578,7 +569,7 @@ export function createOrchestrator({ db, projects, maxWorkers, model, fallbackMo
       }
     }
 
-    console.log('[orchestrator] Shutdown complete.');
+    writeLogFile('Shutdown complete.');
   }
 
   return { start, shutdown };
