@@ -55,6 +55,8 @@ export function buildPrompt(ticket, { userId, projectId, cliPath, userAnswer, no
   parts.push('**ALL file operations (read, write, edit, search, git) MUST use paths within your current working directory.**');
   parts.push('Do NOT use absolute paths to the main repository. Use relative paths or paths starting with your cwd.');
   parts.push('Do NOT modify files outside your worktree — changes to the main repo will be lost and cause conflicts.');
+  parts.push('Do NOT spawn sub-agents with worktree isolation. Work directly in your worktree.');
+  parts.push('When you are finished (done, blocked, or waiting_for_user), the orchestrator will clean up your worktree automatically. Do not attempt to remove it yourself.');
   parts.push('');
 
   // ── Ticket context ──────────────────────────────────────────────
