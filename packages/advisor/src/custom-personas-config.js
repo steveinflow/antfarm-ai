@@ -161,6 +161,20 @@ export function validatePersona(raw, seenIds = new Set()) {
     }
   }
 
+  // ── projects (optional scope) ─────────────────────────────────────────
+  if (raw.projects !== undefined) {
+    if (!Array.isArray(raw.projects)) {
+      errors.push('Persona "projects" must be an array of project ID strings');
+    } else {
+      for (const p of raw.projects) {
+        if (typeof p !== 'string' || !p.trim()) {
+          errors.push('Each entry in "projects" must be a non-empty string');
+          break;
+        }
+      }
+    }
+  }
+
   if (errors.length > 0) {
     return { persona: null, errors };
   }
@@ -182,8 +196,15 @@ export function validatePersona(raw, seenIds = new Set()) {
     ? raw.focusAreas.map(fa => sanitizePromptValue(String(fa))).filter(Boolean)
     : [];
 
+  const projects = Array.isArray(raw.projects)
+    ? raw.projects.map(p => String(p).trim()).filter(Boolean)
+    : undefined;
+  const visual = raw.visual === true;
+  const playtest = raw.playtest === true;
+  const playtestRuns = playtest ? Math.max(1, Math.min(50, Number(raw.playtestRuns) || 10)) : undefined;
+
   return {
-    persona: { id, name, systemPrompt, model, intervalHours, focusAreas },
+    persona: { id, name, systemPrompt, model, intervalHours, focusAreas, ...(projects ? { projects } : {}), ...(visual ? { visual } : {}), ...(playtest ? { playtest, playtestRuns } : {}) },
     errors: [],
   };
 }

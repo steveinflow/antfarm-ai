@@ -1023,6 +1023,7 @@ export async function startAdvisor({ db, advisorConfig }) {
         triggerProjectId,
         scopeText: scopeText || null,
         projectScreenshotConfigs,
+        projectConfigs: projectsCfg,
       });
     }, state, { log });
 
@@ -1044,6 +1045,7 @@ export async function startAdvisor({ db, advisorConfig }) {
         focusAreas: personaCfg.focusAreas || [],
         ...(personaCfg.projects ? { projects: personaCfg.projects } : {}),
         ...(personaCfg.visual ? { visual: true } : {}),
+        ...(personaCfg.playtest ? { playtest: true, playtestRuns: personaCfg.playtestRuns } : {}),
         source: 'config',
       }, { merge: true });
     } catch (err) {

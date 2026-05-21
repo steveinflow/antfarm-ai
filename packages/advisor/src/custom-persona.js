@@ -4,6 +4,7 @@
 // Custom personas always run with the same scoped tool set as built-ins
 // (text-only, no shell exec, no file writes outside worktree).
 
+import { execSync } from 'node:child_process';
 import { ask, askWithImages } from './claude.js';
 import { getScreenshots } from './screenshot-cache.js';
 import { checkDuplicate, checkRejectionMatch } from './dedup.js';
@@ -13,6 +14,7 @@ import { assignClusters } from './cluster.js';
 import { scoreProposal } from './scoreProposal.js';
 import { FILTER_REASONS } from './filter-reasons.js';
 import { sanitizeFocusPrompt, sanitizeSystemPrompt } from './custom-personas-config.js';
+import { scanFiles, formatFileBatch } from './files.js';
 
 function log(personaId, msg) {
   const ts = new Date().toISOString().replace('T', ' ').slice(0, 19);
@@ -144,7 +146,7 @@ export function createCustomPersona(persona) {
    * @param {string|null} [opts.triggerProjectId] - If set, only run against this project
    * @returns {Promise<{ ticketsCreated: number, lastActivity: string }>}
    */
-  async function runCycle({ db, projectService, makeTicketService, onActivity, soulPrompt, focusPrompt, scopeText, triggerProjectId = null, projectScreenshotConfigs = {} }) {
+  async function runCycle({ db, projectService, makeTicketService, onActivity, soulPrompt, focusPrompt, scopeText, triggerProjectId = null, projectScreenshotConfigs = {}, projectConfigs = {} }) {
     const report = (msg) => {
       log(persona.id, msg);
       if (onActivity) onActivity(msg);
@@ -213,26 +215,91 @@ export function createCustomPersona(persona) {
         const rejectionHistoryBlock = formatRejectionHistory(rejections, persona.id);
 
         const sanitizedFocusPrompt = sanitizeFocusPrompt(focusPrompt);
-        const userPrompt = buildPrompt(persona, project.advisorContext, rejectionHistoryBlock, sanitizedFocusPrompt);
+
+        // Scan source files if the project has repoPath + scanPaths configured
+        const pCfg = projectConfigs[project.id] || {};
+        let sourceBlock = '';
+        if (pCfg.repoPath && pCfg.scanPaths?.length) {
+          try {
+            const files = await scanFiles(pCfg.repoPath, pCfg.scanPaths);
+            if (files.length > 0) {
+              report(`[${project.id}] Scanned ${files.length} source file(s)`);
+              sourceBlock = '\n\n## Source Files\n' + formatFileBatch(files);
+              if (runLogger) {
+                for (const f of files) runLogger.addScanned(f.path);
+              }
+            }
+          } catch (scanErr) {
+            report(`[${project.id}] File scan failed: ${scanErr.message}`);
+          }
+        }
+
+        // Run playtest if persona has playtest: true and project has a playtest command
+        let playtestBlock = '';
+        if (persona.playtest && pCfg.repoPath && pCfg.screenshotCommand) {
+          try {
+            // Read playtestRuns override from Firestore persona state, fall back to config default
+            let runs = persona.playtestRuns || 10;
+            try {
+              const personaDoc = await db.collection('advisor').doc(persona.id).get();
+              const fsRuns = personaDoc.exists && personaDoc.data()?.playtestRuns;
+              if (Number.isFinite(fsRuns) && fsRuns >= 1 && fsRuns <= 50) runs = fsRuns;
+            } catch { /* use config default */ }
+
+            // Build the playtest command — replace --runs N if present, otherwise append
+            let cmd = pCfg.screenshotCommand;
+            if (/--runs\s+\d+/.test(cmd)) {
+              cmd = cmd.replace(/--runs\s+\d+/, `--runs ${runs}`);
+            } else {
+              cmd = `${cmd} --runs ${runs}`;
+            }
+            report(`[${project.id}] Running playtest (${runs} run(s))…`);
+            const playtestOutput = execSync(cmd, {
+              cwd: pCfg.repoPath,
+              timeout: 10 * 60 * 1000,
+              encoding: 'utf8',
+              stdio: ['pipe', 'pipe', 'pipe'],
+            });
+            // Extract JSON from output (script may print non-JSON preamble)
+            const jsonStart = playtestOutput.indexOf('{');
+            if (jsonStart >= 0) {
+              const playtestJson = playtestOutput.slice(jsonStart);
+              try {
+                JSON.parse(playtestJson); // validate
+                playtestBlock = '\n\n## Playtest Results\n```json\n' + playtestJson.trim() + '\n```';
+                report(`[${project.id}] Playtest complete`);
+              } catch {
+                report(`[${project.id}] Playtest output was not valid JSON`);
+              }
+            } else {
+              report(`[${project.id}] Playtest produced no JSON output`);
+            }
+          } catch (ptErr) {
+            report(`[${project.id}] Playtest failed: ${ptErr.message?.slice(0, 150)}`);
+          }
+        }
+
+        const userPrompt = buildPrompt(persona, project.advisorContext, rejectionHistoryBlock, sanitizedFocusPrompt) + sourceBlock + playtestBlock;
 
         let raw;
+        const askOpts = { model: persona.model, timeoutMs: 10 * 60 * 1000 };
         const ssConfig = persona.visual && projectScreenshotConfigs[project.id];
         if (ssConfig) {
           try {
             const imageBuffers = await getScreenshots(project.id, ssConfig);
             if (imageBuffers.length > 0) {
               report(`[${project.id}] Using ${imageBuffers.length} screenshot(s)`);
-              raw = await askWithImages(effectiveSystemPrompt, imageBuffers, userPrompt, { model: persona.model });
+              raw = await askWithImages(effectiveSystemPrompt, imageBuffers, userPrompt, askOpts);
             } else {
               report(`[${project.id}] No screenshots found — text-only fallback`);
-              raw = await ask(effectiveSystemPrompt, userPrompt, { model: persona.model });
+              raw = await ask(effectiveSystemPrompt, userPrompt, askOpts);
             }
           } catch (ssErr) {
             report(`[${project.id}] Screenshot capture failed: ${ssErr.message} — text-only fallback`);
-            raw = await ask(effectiveSystemPrompt, userPrompt, { model: persona.model });
+            raw = await ask(effectiveSystemPrompt, userPrompt, askOpts);
           }
         } else {
-          raw = await ask(effectiveSystemPrompt, userPrompt, { model: persona.model });
+          raw = await ask(effectiveSystemPrompt, userPrompt, askOpts);
         }
         const proposals = parseProposals(raw, persona.id);
 
