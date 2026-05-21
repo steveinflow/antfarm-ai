@@ -35,7 +35,7 @@ const COLLECTION = 'advisorRuns';
 export function sanitizeError(err) {
   const msg = (err instanceof Error ? err.message : String(err)) || '';
   if (/rate.?limit/i.test(msg))              return 'rate_limit';
-  if (/timeout/i.test(msg))                  return 'timeout';
+  if (/timeout|aborted/i.test(msg))          return 'timeout';
   if (/no.?codebase|codebase.?path/i.test(msg)) return 'no_codebase_access';
   if (/ENOTFOUND|ECONNREFUSED|network/i.test(msg)) return 'api_unreachable';
   return 'api_error';

@@ -224,11 +224,19 @@ export function createPersonaState(db, personaId) {
   // Watch for runNow flag changes. Calls onRunNow() when runNow becomes true.
   // Returns an unsubscribe function.
   function watchRunNow(onRunNow) {
-    return ref.onSnapshot((snap) => {
-      if (snap.exists && snap.data()?.runNow === true) {
-        onRunNow();
-      }
-    });
+    let unsub;
+    function attach() {
+      unsub = ref.onSnapshot((snap) => {
+        if (snap.exists && snap.data()?.runNow === true) {
+          onRunNow();
+        }
+      }, (err) => {
+        console.error(`[state:${personaId}] watchRunNow listener error: ${err.message} — reattaching in 30s`);
+        setTimeout(attach, 30_000);
+      });
+    }
+    attach();
+    return () => { if (unsub) unsub(); };
   }
 
   // Read the soulPrompt field. Returns null if not set (use hardcoded default).
@@ -289,21 +297,29 @@ export function createPersonaState(db, personaId) {
   // Calls onTrigger({ focusPrompt, requestedBy, requestedAt, projectId }) when a trigger arrives.
   // Returns an unsubscribe function.
   function watchTrigger(onTrigger) {
-    return ref.onSnapshot((snap) => {
-      if (!snap.exists) return;
-      const data = snap.data();
-      const trigger = data?.trigger;
-      // A trigger is pending when it is an object with a requestedAt field and
-      // the 'consumed' flag is not set.
-      if (trigger && typeof trigger === 'object' && trigger.requestedAt && !trigger.consumed) {
-        onTrigger({
-          focusPrompt: trigger.focusPrompt ?? null,
-          requestedBy: trigger.requestedBy ?? null,
-          requestedAt: trigger.requestedAt,
-          projectId: trigger.projectId ?? null,
-        });
-      }
-    });
+    let unsub;
+    function attach() {
+      unsub = ref.onSnapshot((snap) => {
+        if (!snap.exists) return;
+        const data = snap.data();
+        const trigger = data?.trigger;
+        // A trigger is pending when it is an object with a requestedAt field and
+        // the 'consumed' flag is not set.
+        if (trigger && typeof trigger === 'object' && trigger.requestedAt && !trigger.consumed) {
+          onTrigger({
+            focusPrompt: trigger.focusPrompt ?? null,
+            requestedBy: trigger.requestedBy ?? null,
+            requestedAt: trigger.requestedAt,
+            projectId: trigger.projectId ?? null,
+          });
+        }
+      }, (err) => {
+        console.error(`[state:${personaId}] watchTrigger listener error: ${err.message} — reattaching in 30s`);
+        setTimeout(attach, 30_000);
+      });
+    }
+    attach();
+    return () => { if (unsub) unsub(); };
   }
 
   // Read the current trigger data without a listener (one-shot).
@@ -338,13 +354,21 @@ export function createPersonaState(db, personaId) {
   // Watch for runRequestedAt field. Calls onRequest() when a request arrives.
   // Returns an unsubscribe function.
   function watchRunRequested(onRequest) {
-    return ref.onSnapshot((snap) => {
-      if (!snap.exists) return;
-      const data = snap.data();
-      if (data?.runRequestedAt && typeof data.runRequestedAt === 'string') {
-        onRequest({ requestedAt: data.runRequestedAt });
-      }
-    });
+    let unsub;
+    function attach() {
+      unsub = ref.onSnapshot((snap) => {
+        if (!snap.exists) return;
+        const data = snap.data();
+        if (data?.runRequestedAt && typeof data.runRequestedAt === 'string') {
+          onRequest({ requestedAt: data.runRequestedAt });
+        }
+      }, (err) => {
+        console.error(`[state:${personaId}] watchRunRequested listener error: ${err.message} — reattaching in 30s`);
+        setTimeout(attach, 30_000);
+      });
+    }
+    attach();
+    return () => { if (unsub) unsub(); };
   }
 
   // Clear runRequestedAt after pickup (or on cooldown violation).
