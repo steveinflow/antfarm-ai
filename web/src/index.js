@@ -37,7 +37,7 @@ import './styles.css';
         '<div style="font-size:2.5rem">⚠️</div>' +
         '<h2 style="margin:0;font-size:1.25rem;font-weight:600;color:var(--text-bright,#fff)">Something went wrong</h2>' +
         '<p style="margin:0;font-size:.9rem;color:var(--text-muted,#aaa);max-width:360px;line-height:1.6">' +
-        'Docket encountered an unexpected error.</p>' +
+        'Antfarm encountered an unexpected error.</p>' +
         '<button onclick="window.location.reload()" style="padding:10px 24px;font-size:.9rem;font-weight:500;' +
         'border:none;border-radius:8px;background:var(--primary,#7c6bff);color:#fff;cursor:pointer;margin-top:4px">' +
         'Try again</button>' +

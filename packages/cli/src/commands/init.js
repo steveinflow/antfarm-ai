@@ -199,12 +199,12 @@ ${MARKER}
 <div id="docket_overlay"></div>
 <div id="docket_drawer">
   <div id="docket_drawer_header">
-    <h2>Docket</h2>
+    <h2>Antfarm</h2>
     <button id="docket_drawer_close">&times;</button>
   </div>
   <div id="docket_container"></div>
 </div>
-<button id="docket_fab" title="Open Docket">&#9998;</button>
+<button id="docket_fab" title="Open Antfarm">&#9998;</button>
 
 <!-- Firebase compat CDN -->
 <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>

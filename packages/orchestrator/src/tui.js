@@ -611,11 +611,11 @@ function renderTitleBar(cols, state) {
   const queued = queue.length;
   const maxW = config.maxWorkers;
 
-  const title = `${BOLD}${WHITE} ◆ docket orchestrator${RESET}`;
+  const title = `${BOLD}${WHITE} ◆ antfarm orchestrator${RESET}`;
   const stats = `${GREEN}${active}${RESET}${DIM}/${maxW} active${RESET}  ${YELLOW}${paused}${RESET}${DIM} paused${RESET}  ${MAGENTA}${queued}${RESET}${DIM} queued${RESET}`;
   const hint = `${DIM}TAB: focus  q: quit${RESET}`;
 
-  const titleLen = visLen(' ◆ docket orchestrator');
+  const titleLen = visLen(' ◆ antfarm orchestrator');
   const statsLen = visLen(`${active}/${maxW} active  ${paused} paused  ${queued} queued`);
   const hintLen = visLen('TAB: focus  q: quit');
 

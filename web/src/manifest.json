@@ -1,6 +1,6 @@
 {
-  "name": "Docket",
-  "short_name": "Docket",
+  "name": "Antfarm",
+  "short_name": "Antfarm",
   "description": "Ticket management across all projects",
   "start_url": "./",
   "scope": "./",
